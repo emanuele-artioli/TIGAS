@@ -1,0 +1,259 @@
+name: TIGAS CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_nvenc:
+        description: Run NVENC job on self-hosted Linux NVIDIA runner
+        required: false
+        default: false
+        type: boolean
+      pr_number:
+        description: Optional PR number to post/update NVENC quality report comment
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  cpu-native-vmaf:
+    runs-on: ubuntu-latest
+    outputs:
+      vmaf_mean: ${{ steps.cpu_vmaf.outputs.vmaf_mean }}
+      good_quality: ${{ steps.cpu_vmaf.outputs.good_quality }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            pkg-config \
+            ffmpeg \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libswscale-dev \
+            nlohmann-json3-dev \
+            python3 \
+            python3-pip
+
+      - name: Ensure libvmaf filter exists
+        run: ffmpeg -hide_banner -filters | grep -i libvmaf
+
+      - name: Install Python test dependencies
+        run: python3 -m pip install --upgrade pip pytest
+
+      - name: Run Python tests
+        run: PYTHONPATH=. python3 -m pytest -q
+
+      - name: Run end-to-end native test mode (CPU codec)
+        run: |
+          python3 scripts/run_test_mode.py \
+            --movement movement_traces/Linear.json \
+            --network network_traces/lte.csv \
+            --ply assets/sample_cube_ascii.ply \
+            --output artifacts/ci_cpu \
+            --max-frames 120 \
+            --codec libx264 \
+            --min-vmaf 80
+
+      - name: Capture CPU summary
+        id: cpu_vmaf
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          summary = json.loads(Path("artifacts/ci_cpu/summary.json").read_text(encoding="utf-8"))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+            fh.write(f"vmaf_mean={summary.get('vmaf_mean', 0)}\n")
+            fh.write(f"good_quality={str(summary.get('good_quality', False)).lower()}\n")
+          PY
+
+      - name: Upload CPU artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tigas-cpu-artifacts
+          path: artifacts/ci_cpu/
+
+      - name: Comment PR with CPU VMAF
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- tigas-ci-vmaf -->';
+            const cpuMarker = '<!-- tigas-ci-vmaf-cpu -->';
+            const nvencMarker = '<!-- tigas-ci-vmaf-nvenc -->';
+            const vmaf = '${{ steps.cpu_vmaf.outputs.vmaf_mean }}';
+            const good = '${{ steps.cpu_vmaf.outputs.good_quality }}' === 'true';
+            const cpuBlock = `${cpuMarker}
+            ### CPU native VMAF
+            - VMAF mean: ${vmaf}
+            - Gate (>= 80): ${good ? 'PASS ✅' : 'FAIL ❌'}
+            - Artifacts: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.user?.type === 'Bot' && c.body?.includes(marker));
+
+            if (existing) {
+              const existingBody = existing.body || '';
+              const nvencStart = existingBody.indexOf(nvencMarker);
+              const nvencBlock = nvencStart >= 0 ? existingBody.slice(nvencStart).trim() : '';
+              const body = [
+                marker,
+                '## TIGAS CI Quality Report',
+                cpuBlock,
+                nvencBlock,
+              ].filter(Boolean).join('\n\n');
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              const body = [
+                marker,
+                '## TIGAS CI Quality Report',
+                cpuBlock,
+              ].join('\n\n');
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+  nvenc-native-vmaf:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_nvenc }}
+    runs-on: [self-hosted, linux, x64, nvidia]
+    outputs:
+      vmaf_mean: ${{ steps.nvenc_vmaf.outputs.vmaf_mean }}
+      good_quality: ${{ steps.nvenc_vmaf.outputs.good_quality }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify NVENC support
+        run: ffmpeg -hide_banner -encoders | grep -i h264_nvenc
+
+      - name: Verify libvmaf support
+        run: ffmpeg -hide_banner -filters | grep -i libvmaf
+
+      - name: Install Python test dependencies
+        run: python3 -m pip install --upgrade pip pytest
+
+      - name: Run Python tests
+        run: PYTHONPATH=. python3 -m pytest -q
+
+      - name: Run end-to-end native test mode (NVENC)
+        run: |
+          python3 scripts/run_test_mode.py \
+            --movement movement_traces/Linear.json \
+            --network network_traces/lte.csv \
+            --ply assets/sample_cube_ascii.ply \
+            --output artifacts/ci_nvenc \
+            --max-frames 240 \
+            --codec h264_nvenc \
+            --min-vmaf 80
+
+      - name: Capture NVENC summary
+        id: nvenc_vmaf
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          summary = json.loads(Path("artifacts/ci_nvenc/summary.json").read_text(encoding="utf-8"))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+            fh.write(f"vmaf_mean={summary.get('vmaf_mean', 0)}\n")
+            fh.write(f"good_quality={str(summary.get('good_quality', False)).lower()}\n")
+          PY
+
+      - name: Upload NVENC artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tigas-nvenc-artifacts
+          path: artifacts/ci_nvenc/
+
+      - name: Comment PR with NVENC VMAF
+        if: ${{ inputs.pr_number != '' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- tigas-ci-vmaf -->';
+            const cpuMarker = '<!-- tigas-ci-vmaf-cpu -->';
+            const nvencMarker = '<!-- tigas-ci-vmaf-nvenc -->';
+            const vmaf = '${{ steps.nvenc_vmaf.outputs.vmaf_mean }}';
+            const good = '${{ steps.nvenc_vmaf.outputs.good_quality }}' === 'true';
+            const prNumber = Number('${{ inputs.pr_number }}');
+
+            if (!prNumber || Number.isNaN(prNumber)) {
+              core.setFailed('inputs.pr_number must be a valid pull request number when provided.');
+              return;
+            }
+
+            const nvencBlock = `${nvencMarker}
+            ### NVENC native VMAF
+            - VMAF mean: ${vmaf}
+            - Gate (>= 80): ${good ? 'PASS ✅' : 'FAIL ❌'}
+            - Artifacts: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            const existing = comments.find(c => c.user?.type === 'Bot' && c.body?.includes(marker));
+
+            if (existing) {
+              const existingBody = existing.body || '';
+              const cpuStart = existingBody.indexOf(cpuMarker);
+              const cpuBlock = cpuStart >= 0
+                ? (existingBody.indexOf(nvencMarker) >= 0
+                  ? existingBody.slice(cpuStart, existingBody.indexOf(nvencMarker)).trim()
+                  : existingBody.slice(cpuStart).trim())
+                : '';
+
+              const body = [
+                marker,
+                '## TIGAS CI Quality Report',
+                cpuBlock,
+                nvencBlock,
+              ].filter(Boolean).join('\n\n');
+
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              const body = [
+                marker,
+                '## TIGAS CI Quality Report',
+                nvencBlock,
+              ].join('\n\n');
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+            }

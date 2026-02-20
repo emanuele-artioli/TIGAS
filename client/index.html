@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TIGAS Client</title>
+    <script src="https://cdn.dashjs.org/latest/dash.all.min.js"></script>
+    <style>
+      body { margin: 0; background: #111; color: #eee; font-family: sans-serif; }
+      #hud { position: fixed; top: 8px; left: 8px; background: rgba(0,0,0,.45); padding: 8px; border-radius: 6px; }
+      video { width: 100vw; height: 100vh; object-fit: contain; }
+    </style>
+  </head>
+  <body>
+    <div id="hud">TIGAS connected</div>
+    <video id="video" autoplay muted playsinline controls></video>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

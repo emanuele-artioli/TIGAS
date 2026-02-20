@@ -201,6 +201,13 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# TIGAS artifacts
+native/renderer_encoder/build/
+artifacts/
+certs/
+*.m4s
+*.mpd
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
