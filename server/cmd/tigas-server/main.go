@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,10 +29,51 @@ type controlStore struct {
 	messages []controlMessage
 }
 
+type abrState struct {
+	mu                 sync.Mutex
+	ewmaBandwidthKbps  float64
+	currentProfile     string
+	lastUpdate         time.Time
+}
+
 func (s *controlStore) append(msg []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.messages = append(s.messages, controlMessage{Payload: append([]byte{}, msg...), At: time.Now()})
+}
+
+func (a *abrState) updateFromSample(kbps float64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if kbps <= 0 {
+		return
+	}
+	if a.ewmaBandwidthKbps <= 0 {
+		a.ewmaBandwidthKbps = kbps
+	} else {
+		a.ewmaBandwidthKbps = 0.8*a.ewmaBandwidthKbps + 0.2*kbps
+	}
+	a.currentProfile = profileForBandwidth(a.ewmaBandwidthKbps)
+	a.lastUpdate = time.Now()
+}
+
+func (a *abrState) snapshot() (string, float64, time.Time) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.currentProfile, a.ewmaBandwidthKbps, a.lastUpdate
+}
+
+func profileForBandwidth(kbps float64) string {
+	switch {
+	case kbps < 2500:
+		return "p0"
+	case kbps < 6000:
+		return "p1"
+	case kbps < 12000:
+		return "p2"
+	default:
+		return "p3"
+	}
 }
 
 func main() {
@@ -60,11 +103,42 @@ func main() {
 	defer logFile.Close()
 
 	store := &controlStore{}
+	abr := &abrState{currentProfile: "p1", ewmaBandwidthKbps: 6000}
 
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.Dir(*staticDir)))
-	mux.Handle("/dash/", http.StripPrefix("/dash/", http.FileServer(http.Dir(*segmentsDir))))
+	dashFileServer := http.StripPrefix("/dash/", http.FileServer(http.Dir(*segmentsDir)))
+	mux.Handle("/dash/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		dashFileServer.ServeHTTP(w, r)
+
+		if !strings.HasSuffix(r.URL.Path, ".m4s") {
+			return
+		}
+		relPath := strings.TrimPrefix(r.URL.Path, "/dash/")
+		fullPath := filepath.Join(*segmentsDir, relPath)
+		stat, err := os.Stat(fullPath)
+		if err != nil || stat.Size() <= 0 {
+			return
+		}
+		durationSec := time.Since(start).Seconds()
+		if durationSec <= 0.0001 {
+			return
+		}
+		kbps := (float64(stat.Size()) * 8.0) / 1000.0 / durationSec
+		abr.updateFromSample(kbps)
+	}))
 	mux.Handle("/movement_traces/", http.StripPrefix("/movement_traces/", http.FileServer(http.Dir(*movementDir))))
+	mux.HandleFunc("/abr-profile", func(w http.ResponseWriter, r *http.Request) {
+		profile, kbps, updatedAt := abr.snapshot()
+		response := map[string]any{
+			"profile": profile,
+			"estimated_kbps": kbps,
+			"updated_at": updatedAt.Format(time.RFC3339Nano),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
 
 	wt := &webtransport.Server{H3: http3.Server{}}
 	mux.HandleFunc("/wt", func(w http.ResponseWriter, r *http.Request) {

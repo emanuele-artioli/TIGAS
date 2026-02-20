@@ -1,7 +1,10 @@
 #include <filesystem>
 #include <iostream>
+#include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "tigas_encoder.hpp"
 #include "tigas_renderer.hpp"
@@ -17,7 +20,22 @@ struct Args {
   int fps = 60;
   int crf = 26;
   std::string codec = "h264_nvenc";
+  bool prefer_cuda = true;
+  std::vector<int> crf_ladder;
 };
+
+std::vector<int> parse_crf_ladder(const std::string& input) {
+  std::vector<int> values;
+  std::stringstream ss(input);
+  std::string token;
+  while (std::getline(ss, token, ',')) {
+    if (token.empty()) {
+      continue;
+    }
+    values.push_back(std::stoi(token));
+  }
+  return values;
+}
 
 Args parse_args(int argc, char** argv) {
   Args args;
@@ -45,6 +63,10 @@ Args parse_args(int argc, char** argv) {
       args.crf = std::stoi(read_value(key));
     } else if (key == "--codec") {
       args.codec = read_value(key);
+    } else if (key == "--disable-cuda") {
+      args.prefer_cuda = false;
+    } else if (key == "--crf-ladder") {
+      args.crf_ladder = parse_crf_ladder(read_value(key));
     } else {
       throw std::runtime_error("Unknown argument: " + key);
     }
@@ -68,8 +90,9 @@ int main(int argc, char** argv) {
       throw std::runtime_error("Movement trace has no samples");
     }
 
-    tigas::GaussianRenderer renderer(args.ply_path);
+    tigas::GaussianRenderer renderer(args.ply_path, args.prefer_cuda);
     const auto first_frame = renderer.render(movement.front());
+    std::cout << "Renderer backend: " << (renderer.is_using_cuda() ? "CUDA" : "CPU") << "\n";
 
     const std::string lossless_path = (std::filesystem::path(args.output_dir) / "ground_truth_lossless.mkv").string();
     const std::string lossy_path = (std::filesystem::path(args.output_dir) / "test_stream_lossy.mp4").string();
@@ -80,6 +103,18 @@ int main(int argc, char** argv) {
 
     tigas::VideoEncoder lossless_encoder(lossless_path, lossless_cfg, first_frame.width, first_frame.height);
     tigas::VideoEncoder lossy_encoder(lossy_path, lossy_cfg, first_frame.width, first_frame.height);
+    std::vector<std::unique_ptr<tigas::VideoEncoder>> ladder_encoders;
+    std::vector<std::string> ladder_paths;
+    for (size_t idx = 0; idx < args.crf_ladder.size(); ++idx) {
+      const int ladder_crf = args.crf_ladder[idx];
+      if (ladder_crf == args.crf) {
+        continue;
+      }
+      const std::string ladder_path = (std::filesystem::path(args.output_dir) / ("test_stream_lossy_p" + std::to_string(idx) + ".mp4")).string();
+      tigas::EncodeConfig cfg{args.codec, args.fps, ladder_crf, false};
+      ladder_encoders.emplace_back(std::make_unique<tigas::VideoEncoder>(ladder_path, cfg, first_frame.width, first_frame.height));
+      ladder_paths.push_back(ladder_path);
+    }
     tigas::MetadataWriter metadata_writer(metadata_path);
 
     for (const auto& sample : movement) {
@@ -88,15 +123,24 @@ int main(int argc, char** argv) {
 
       lossless_encoder.encode_frame(frame, metadata);
       lossy_encoder.encode_frame(frame, metadata);
+      for (auto& encoder : ladder_encoders) {
+        encoder->encode_frame(frame, metadata);
+      }
       metadata_writer.append(metadata);
     }
 
     lossless_encoder.flush();
     lossy_encoder.flush();
+    for (auto& encoder : ladder_encoders) {
+      encoder->flush();
+    }
 
     std::cout << "Encoded " << movement.size() << " frames\n";
     std::cout << "Lossless: " << lossless_path << "\n";
     std::cout << "Lossy: " << lossy_path << "\n";
+    for (const auto& path : ladder_paths) {
+      std::cout << "LossyLadder: " << path << "\n";
+    }
     std::cout << "Metadata: " << metadata_path << "\n";
     return 0;
   } catch (const std::exception& ex) {

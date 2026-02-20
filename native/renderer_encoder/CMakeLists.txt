@@ -6,6 +6,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(TIGAS_USE_CUDA "Enable CUDA acceleration" ON)
 
+set(TIGAS_CUDA_ENABLED OFF)
+if(TIGAS_USE_CUDA)
+  find_package(CUDAToolkit QUIET)
+  if(CUDAToolkit_FOUND)
+    enable_language(CUDA)
+    set(TIGAS_CUDA_ENABLED ON)
+  endif()
+endif()
+
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(AVFORMAT REQUIRED libavformat)
 pkg_check_modules(AVCODEC REQUIRED libavcodec)
@@ -20,6 +29,16 @@ add_executable(tigas_renderer_encoder
   src/tigas_renderer.cpp
   src/tigas_encoder.cpp
 )
+
+if(TIGAS_CUDA_ENABLED)
+  target_sources(tigas_renderer_encoder PRIVATE src/tigas_cuda_renderer.cu)
+  target_link_libraries(tigas_renderer_encoder PRIVATE CUDA::cudart)
+  set_target_properties(tigas_renderer_encoder PROPERTIES CUDA_STANDARD 17)
+  target_compile_definitions(tigas_renderer_encoder PRIVATE TIGAS_HAS_CUDA=1)
+else()
+  target_sources(tigas_renderer_encoder PRIVATE src/tigas_cuda_stub.cpp)
+  target_compile_definitions(tigas_renderer_encoder PRIVATE TIGAS_HAS_CUDA=0)
+endif()
 
 target_include_directories(tigas_renderer_encoder PRIVATE
   include
@@ -51,6 +70,6 @@ target_compile_options(tigas_renderer_encoder PRIVATE
   ${SWSCALE_CFLAGS_OTHER}
 )
 
-if(TIGAS_USE_CUDA)
+if(TIGAS_CUDA_ENABLED)
   target_compile_definitions(tigas_renderer_encoder PRIVATE TIGAS_USE_CUDA=1)
 endif()

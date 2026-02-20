@@ -1,9 +1,11 @@
 #include "tigas_renderer.hpp"
+#include "tigas_cuda_renderer.hpp"
 
 #include <algorithm>
 #include <cstdint>
 #include <cmath>
 #include <fstream>
+#include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <sstream>
@@ -17,6 +19,10 @@ float deg_to_rad(float degree) {
 }
 
 constexpr float kShC0 = 0.28209479177387814f;
+
+float sigmoid(float x) {
+  return 1.0f / (1.0f + std::exp(-x));
+}
 
 std::string trim_right(std::string value) {
   while (!value.empty() && (value.back() == '\r' || value.back() == '\n' || value.back() == ' ' || value.back() == '\t')) {
@@ -90,11 +96,29 @@ struct VertexProperty {
   std::string name;
 };
 
-tigas::Point3D make_point(float x, float y, float z, bool has_rgb, int r, int g, int b, bool has_dc, float dc0, float dc1, float dc2) {
+tigas::Point3D make_point(
+    float x,
+    float y,
+    float z,
+    bool has_rgb,
+    int r,
+    int g,
+    int b,
+    bool has_dc,
+    float dc0,
+    float dc1,
+    float dc2,
+    float opacity_logit,
+    float scale0,
+    float scale1,
+    float scale2) {
   tigas::Point3D point{};
   point.x = x;
   point.y = y;
   point.z = z;
+  point.opacity = std::clamp(sigmoid(opacity_logit), 0.02f, 1.0f);
+  const float scale_avg = (scale0 + scale1 + scale2) / 3.0f;
+  point.radius = std::clamp(std::exp(scale_avg), 0.25f, 8.0f);
 
   if (has_rgb) {
     point.r = static_cast<uint8_t>(std::clamp(r, 0, 255));
@@ -123,11 +147,19 @@ tigas::Point3D make_point(float x, float y, float z, bool has_rgb, int r, int g,
 
 namespace tigas {
 
-GaussianRenderer::GaussianRenderer(std::string ply_path)
-    : ply_path_(std::move(ply_path)), points_(load_points(ply_path_)) {
+GaussianRenderer::GaussianRenderer(std::string ply_path, bool prefer_cuda)
+    : ply_path_(std::move(ply_path)),
+      points_(load_points(ply_path_)),
+      prefer_cuda_(prefer_cuda),
+      use_cuda_(prefer_cuda && cuda_backend::available()),
+      cuda_warning_emitted_(false) {
   if (!ply_path_.empty() && points_.empty()) {
     throw std::runtime_error("Failed to parse PLY points from: " + ply_path_);
   }
+}
+
+bool GaussianRenderer::is_using_cuda() const {
+  return use_cuda_;
 }
 
 std::vector<Point3D> GaussianRenderer::load_points(const std::string& path) const {
@@ -226,6 +258,10 @@ std::vector<Point3D> GaussianRenderer::load_points(const std::string& path) cons
       float dc0 = 0.0f;
       float dc1 = 0.0f;
       float dc2 = 0.0f;
+      float opacity_logit = 0.0f;
+      float scale0 = -1.5f;
+      float scale1 = -1.5f;
+      float scale2 = -1.5f;
 
       for (size_t prop_idx = 0; prop_idx < vertex_properties.size(); ++prop_idx) {
         const auto& prop = vertex_properties[prop_idx];
@@ -251,10 +287,18 @@ std::vector<Point3D> GaussianRenderer::load_points(const std::string& path) cons
         } else if (prop.name == "f_dc_2") {
           has_dc = true;
           dc2 = static_cast<float>(value);
+        } else if (prop.name == "opacity") {
+          opacity_logit = static_cast<float>(value);
+        } else if (prop.name == "scale_0") {
+          scale0 = static_cast<float>(value);
+        } else if (prop.name == "scale_1") {
+          scale1 = static_cast<float>(value);
+        } else if (prop.name == "scale_2") {
+          scale2 = static_cast<float>(value);
         }
       }
 
-      points.push_back(make_point(x, y, z, has_rgb, r, g, b, has_dc, dc0, dc1, dc2));
+      points.push_back(make_point(x, y, z, has_rgb, r, g, b, has_dc, dc0, dc1, dc2, opacity_logit, scale0, scale1, scale2));
     }
     return points;
   }
@@ -271,6 +315,10 @@ std::vector<Point3D> GaussianRenderer::load_points(const std::string& path) cons
     float dc0 = 0.0f;
     float dc1 = 0.0f;
     float dc2 = 0.0f;
+    float opacity_logit = 0.0f;
+    float scale0 = -1.5f;
+    float scale1 = -1.5f;
+    float scale2 = -1.5f;
 
     for (const auto& prop : vertex_properties) {
       if (scalar_size_bytes(prop.type) == 0) {
@@ -302,10 +350,18 @@ std::vector<Point3D> GaussianRenderer::load_points(const std::string& path) cons
       } else if (prop.name == "f_dc_2") {
         has_dc = true;
         dc2 = static_cast<float>(value);
+      } else if (prop.name == "opacity") {
+        opacity_logit = static_cast<float>(value);
+      } else if (prop.name == "scale_0") {
+        scale0 = static_cast<float>(value);
+      } else if (prop.name == "scale_1") {
+        scale1 = static_cast<float>(value);
+      } else if (prop.name == "scale_2") {
+        scale2 = static_cast<float>(value);
       }
     }
 
-    points.push_back(make_point(x, y, z, has_rgb, r, g, b, has_dc, dc0, dc1, dc2));
+    points.push_back(make_point(x, y, z, has_rgb, r, g, b, has_dc, dc0, dc1, dc2, opacity_logit, scale0, scale1, scale2));
   }
 
   return points;
@@ -319,6 +375,18 @@ RGBFrame GaussianRenderer::render(const MovementSample& sample) const {
   frame.width = width;
   frame.height = height;
   frame.data.resize(static_cast<size_t>(width * height * 3));
+
+  if (!points_.empty() && use_cuda_) {
+    std::string error_message;
+    if (cuda_backend::render_points(points_, sample, frame, error_message)) {
+      return frame;
+    }
+    use_cuda_ = false;
+    if (!cuda_warning_emitted_) {
+      cuda_warning_emitted_ = true;
+      std::cerr << "[tigas_renderer] CUDA render unavailable, switching to CPU fallback: " << error_message << "\n";
+    }
+  }
 
   const float yaw = deg_to_rad(sample.angle);
   const float pitch = deg_to_rad(sample.elevation);
@@ -348,15 +416,28 @@ RGBFrame GaussianRenderer::render(const MovementSample& sample) const {
         continue;
       }
 
-      const float depth_weight = std::clamp(2.0f / (1.0f + yz_z * yz_z), 0.1f, 1.0f);
-      for (int oy = -1; oy <= 1; ++oy) {
-        for (int ox = -1; ox <= 1; ++ox) {
+      const float depth_weight = std::clamp(2.0f / (1.0f + yz_z * yz_z), 0.15f, 1.0f);
+      const float screen_radius = std::clamp((point.radius * fx / std::max(yz_z, 0.05f)) * 0.05f, 1.0f, 9.0f);
+      const int radius_px = static_cast<int>(std::ceil(screen_radius));
+      const float sigma2 = std::max(0.5f, screen_radius * screen_radius * 0.5f);
+
+      for (int oy = -radius_px; oy <= radius_px; ++oy) {
+        for (int ox = -radius_px; ox <= radius_px; ++ox) {
           const int x = px + ox;
           const int y = py + oy;
+          if (x < 0 || y < 0 || x >= width || y >= height) {
+            continue;
+          }
+          const float d2 = static_cast<float>(ox * ox + oy * oy);
+          const float gaussian = std::exp(-d2 / (2.0f * sigma2));
+          const float alpha = std::clamp(gaussian * point.opacity * depth_weight, 0.0f, 1.0f);
           const size_t idx = static_cast<size_t>((y * width + x) * 3);
-          frame.data[idx + 0] = static_cast<uint8_t>(std::clamp(static_cast<float>(frame.data[idx + 0]) * 0.35f + point.r * depth_weight, 0.0f, 255.0f));
-          frame.data[idx + 1] = static_cast<uint8_t>(std::clamp(static_cast<float>(frame.data[idx + 1]) * 0.35f + point.g * depth_weight, 0.0f, 255.0f));
-          frame.data[idx + 2] = static_cast<uint8_t>(std::clamp(static_cast<float>(frame.data[idx + 2]) * 0.35f + point.b * depth_weight, 0.0f, 255.0f));
+          const float base_r = static_cast<float>(frame.data[idx + 0]);
+          const float base_g = static_cast<float>(frame.data[idx + 1]);
+          const float base_b = static_cast<float>(frame.data[idx + 2]);
+          frame.data[idx + 0] = static_cast<uint8_t>(std::clamp(base_r * (1.0f - alpha) + point.r * alpha, 0.0f, 255.0f));
+          frame.data[idx + 1] = static_cast<uint8_t>(std::clamp(base_g * (1.0f - alpha) + point.g * alpha, 0.0f, 255.0f));
+          frame.data[idx + 2] = static_cast<uint8_t>(std::clamp(base_b * (1.0f - alpha) + point.b * alpha, 0.0f, 255.0f));
         }
       }
     }

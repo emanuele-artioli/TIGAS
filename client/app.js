@@ -4,13 +4,23 @@ const hud = document.getElementById("hud");
 const DASH_URL = "/dash/stream.mpd";
 const WT_URL = "https://localhost:4433/wt";
 
+async function fetchAbrProfile() {
+  try {
+    const response = await fetch("/abr-profile");
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
 function initDash() {
   const player = dashjs.MediaPlayer().create();
   player.updateSettings({
     streaming: {
       lowLatencyEnabled: true,
       delay: { liveDelay: 0.5, liveDelayFragmentCount: 1 },
-      abr: { autoSwitchBitrate: { video: true } },
+      abr: { autoSwitchBitrate: { video: false } },
       buffer: {
         stableBufferTime: 0.6,
         fastSwitchEnabled: true,
@@ -21,6 +31,14 @@ function initDash() {
   });
   player.initialize(videoEl, DASH_URL, true);
   return player;
+}
+
+function profileToQualityIndex(profile, maxIndex) {
+  const normalized = String(profile || "p0").toLowerCase();
+  if (normalized === "p3") return Math.min(3, maxIndex);
+  if (normalized === "p2") return Math.min(2, maxIndex);
+  if (normalized === "p1") return Math.min(1, maxIndex);
+  return 0;
 }
 
 async function initWebTransport() {
@@ -53,16 +71,35 @@ async function loadMovementTrace() {
 }
 
 async function run() {
-  initDash();
+  const player = initDash();
   const wt = await initWebTransport();
   const trace = await loadMovementTrace();
 
   hud.textContent = `TIGAS running: ${trace.length} poses`;
 
+  const abrTimer = setInterval(async () => {
+    const abr = await fetchAbrProfile();
+    if (!abr) return;
+    try {
+      const bitrateInfo = player.getBitrateInfoListFor("video") || [];
+      if (bitrateInfo.length > 0) {
+        const targetQuality = profileToQualityIndex(abr.profile, bitrateInfo.length - 1);
+        const currentQuality = player.getQualityFor("video");
+        if (currentQuality !== targetQuality) {
+          player.setQualityFor("video", targetQuality, true);
+        }
+      }
+    } catch (err) {
+      console.warn("ABR profile apply failed", err);
+    }
+    hud.textContent = `TIGAS poses=${trace.length} abr=${abr.profile} bw=${Math.round(abr.estimated_kbps || 0)}kbps`;
+  }, 1000);
+
   let idx = 0;
   const tick = () => {
     if (idx >= trace.length) {
       hud.textContent = "TIGAS trace complete";
+      clearInterval(abrTimer);
       return;
     }
 
