@@ -111,53 +111,12 @@ Notes:
 
 Status: user-input controls (mouse/keyboard camera navigation) are not implemented yet. The current client sends pose datagrams from `movement_traces/Linear.json` automatically.
 
-### 3) Headless mode (no GUI)
+### 3) Test mode (basic-mode live path + headless + quality evaluation)
 
-This mode runs server + headless browser and writes artifacts (for example `control_messages.bin`, `headless_status.json`) without opening a visible UI.
-
-```bash
-cd /Users/manu/Desktop/TIGAS
-
-# prepare stream artifacts first (offline prep for headless/test flows)
-native/renderer_encoder/build/tigas_renderer_encoder \
-	--movement movement_traces/Linear.json \
-	--output-dir artifacts/headless \
-	--ply '/Users/manu/Desktop/Datasets/3DGS_PLY_sample_data/PLY(postshot)/cactus_splat3_30kSteps_142k_splats.ply' \
-	--max-frames 240 \
-	--fps 60 \
-	--codec libx264 \
-	--crf 22
-
-python3 scripts/package_dash.py \
-	--inputs artifacts/headless/test_stream_lossy.mp4 \
-	--output artifacts/headless \
-	--fps 60
-
-# start server (terminal A)
-cd server
-go run ./cmd/tigas-server \
-	--cert ../certs/server.crt \
-	--key ../certs/server.key \
-	--static ../client \
-	--segments ../artifacts/headless \
-	--movement ../movement_traces \
-	--control-log ../artifacts/headless/control_messages.bin
-
-# run headless browser (terminal B)
-cd ..
-python3 scripts/headless_client.py \
-	--url https://localhost:4433/ \
-	--duration 25 \
-	--insecure \
-	--status-output artifacts/headless/headless_status.json
-```
-
-### 4) Test mode (headless + ground truth + quality evaluation)
-
-This is the end-to-end quality gate mode.
+This is the end-to-end quality gate mode. It reuses the live basic-mode path internally (server + live DASH), then extends it with headless playback verification, ground-truth/lossy exports, frame extraction, and VMAF/alignment checks.
 
 ```bash
-cd /Users/manu/Desktop/TIGAS
+cd /Users/manu/Desktop/TIGAS && conda activate tigas
 
 python3 scripts/run_test_mode.py \
 	--movement movement_traces/Linear.json \
@@ -165,7 +124,7 @@ python3 scripts/run_test_mode.py \
 	--ply '/Users/manu/Desktop/Datasets/3DGS_PLY_sample_data/PLY(postshot)/cactus_splat3_30kSteps_142k_splats.ply' \
 	--output artifacts/test_mode \
 	--codec h264_nvenc \
-	--max-frames 1200
+	--max-frames 300
 ```
 
 Useful options:
@@ -180,10 +139,12 @@ python3 scripts/run_test_mode.py ... --require-sei-strict
 
 Expected key outputs:
 
-- `artifacts/test_mode/ground_truth_lossless.mkv`
-- `artifacts/test_mode/test_stream_lossy.mp4`
-- `artifacts/test_mode/stream.mpd`
-- `artifacts/test_mode/vmaf_results.json`
+- `artifacts/test_mode/live/stream.mpd`
+- `artifacts/test_mode/live/headless_status.json`
+- `artifacts/test_mode/evaluation/ground_truth_lossless.mkv`
+- `artifacts/test_mode/evaluation/test_stream_lossy.mp4`
+- `artifacts/test_mode/frames/ground_truth/*.png`
+- `artifacts/test_mode/frames/lossy/*.png`
 - `artifacts/test_mode/summary.json`
 
 Exit code:

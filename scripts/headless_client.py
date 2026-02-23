@@ -9,16 +9,24 @@ from playwright.sync_api import sync_playwright
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run TIGAS client in headless Chrome")
+    parser = argparse.ArgumentParser(description="Internal helper for TIGAS test-mode headless browser checks")
     parser.add_argument("--url", default="https://localhost:4433/")
+    parser.add_argument("--force-quic-origin", default="localhost:4433")
+    parser.add_argument("--spki-hash", default="")
     parser.add_argument("--duration", type=int, default=60)
     parser.add_argument("--insecure", action="store_true")
-    parser.add_argument("--allow-failure", action="store_true")
     parser.add_argument("--status-output", type=Path)
     args = parser.parse_args()
 
+    launch_args = ["--enable-quic", f"--origin-to-force-quic-on={args.force_quic_origin}"]
+    if args.spki_hash:
+        launch_args.append(f"--ignore-certificate-errors-spki-list={args.spki_hash}")
+
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--enable-quic", "--origin-to-force-quic-on=localhost:4433"])
+        browser = p.chromium.launch(
+            headless=True,
+            args=launch_args,
+        )
         context = browser.new_context(ignore_https_errors=args.insecure)
         page = context.new_page()
         try:
@@ -39,15 +47,11 @@ def _main() -> int:
         return main()
     except Exception as exc:
         parser = argparse.ArgumentParser(add_help=False)
-        parser.add_argument("--allow-failure", action="store_true")
         parser.add_argument("--status-output", type=Path)
         known, _ = parser.parse_known_args()
         if known.status_output:
             known.status_output.parent.mkdir(parents=True, exist_ok=True)
             known.status_output.write_text(json.dumps({"headless_ok": False, "error": str(exc)}, indent=2), encoding="utf-8")
-        if known.allow_failure:
-            print(f"[headless_client] warning: {exc}")
-            return 0
         raise
 
 
