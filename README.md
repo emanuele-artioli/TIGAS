@@ -45,6 +45,10 @@ cmake --build native/renderer_encoder/build -j
 bash scripts/generate_dev_cert.sh certs
 ```
 
+This generates a CA-signed leaf certificate chain and prints an **SPKI hash** saved to `certs/spki.hash`.
+Chrome requires this hash via `--ignore-certificate-errors-spki-list=<hash>` — the standard
+`--ignore-certificate-errors` flag does **not** apply to QUIC connections.
+
 ### 5) Go modules
 
 ```bash
@@ -57,14 +61,78 @@ cd ..
 
 Each mode below is self-contained with the commands needed to run it.
 
-### 1) Basic mode (trace-driven playback in DASH player)
+### 1) Basic mode
 
-This mode renders/encodes from movement trace + PLY, packages DASH, serves via HTTP/3, and displays in browser.
+Basic mode is live by design: rendering, encoding, CMAF chunk creation, and HTTP/3 serving happen concurrently.
+
+```bash
+cd /Users/manu/Desktop/TIGAS && conda activate tigas
+
+python3 scripts/run_basic_mode.py \
+	--movement movement_traces/Linear.json \
+	--ply '/Users/manu/Desktop/Datasets/3DGS_PLY_sample_data/PLY(postshot)/cactus_splat3_30kSteps_142k_splats.ply' \
+	--output artifacts/basic \
+	--max-frames 1800 \
+	--fps 60 \
+	--codec libx264 \
+	--crf 20
+```
+
+Open `https://localhost:4433/` while the command is running.
+
+Because the server is QUIC-only (no TCP fallback), launch Chrome with QUIC forced for the origin:
 
 ```bash
 cd /Users/manu/Desktop/TIGAS
+scripts/launch_quic_chrome.sh https://localhost:4433/
+```
 
-# render + encode (lossy) + metadata
+Notes:
+
+- Firefox is not supported for this QUIC/WebTransport path.
+- If using a different port (for example `--addr :4443`), pass the matching URL to `launch_quic_chrome.sh`.
+- The launcher uses an isolated temporary Chrome profile and forces QUIC for the target origin.
+- Console lines about GCM/Updater/Crashpad are expected noise and are not TIGAS failures.
+- If browser still cannot connect, first verify server is running: `lsof -nP -iUDP:4433` (or your selected port).
+- The launcher writes a netlog at `/tmp/tigas-quic-netlog-YYYYmmdd-HHMMSS.json` for deeper QUIC diagnostics.
+- By default `run_basic_mode.py` keeps the QUIC server alive for 120 seconds after producer completion (`--linger-seconds`).
+
+#### CMAF playback validation (Chrome, tested)
+
+To confirm DASH/CMAF playback is actually running (not just page load):
+
+1. Start Basic mode (or start `tigas-server` pointing `--segments` to a folder containing `stream.mpd`, `init_*.mp4`, `chunk_*.m4s`).
+2. Launch Chrome with `scripts/launch_quic_chrome.sh https://localhost:4433/`.
+3. Verify these signals:
+   - Network panel shows repeated `GET /dash/stream.mpd` and multiple `GET /dash/chunk_*.m4s` with `200`.
+   - `<video>` advances (`currentTime` keeps increasing) and is not paused.
+   - No `4xx/5xx` on DASH segment requests.
+
+Observed on this macOS environment during validation:
+
+- `stream.mpd` requested repeatedly and `chunk_*.m4s` fetched successfully.
+- Video state reached `readyState=2` and `currentTime` advanced while unpaused.
+
+Note: Chrome console may still show WebTransport handshake errors (`/wt`) during playback-only tests. Those do not block dash.js CMAF video playback verification.
+
+Alternative (manual split terminals):
+
+```bash
+# terminal A: server
+cd /Users/manu/Desktop/TIGAS/server
+go run ./cmd/tigas-server \
+	--cert ../certs/server-chain.crt \
+	--key ../certs/server.key \
+	--static ../client \
+	--segments ../artifacts/basic \
+	--movement ../movement_traces
+
+# terminal C: launch Chrome with QUIC forced + SPKI cert trust
+cd /Users/manu/Desktop/TIGAS
+scripts/launch_quic_chrome.sh https://localhost:4433/
+
+# terminal B: live producer (no offline packaging step)
+cd /Users/manu/Desktop/TIGAS
 native/renderer_encoder/build/tigas_renderer_encoder \
 	--movement movement_traces/Linear.json \
 	--output-dir artifacts/basic \
@@ -72,31 +140,13 @@ native/renderer_encoder/build/tigas_renderer_encoder \
 	--max-frames 300 \
 	--fps 60 \
 	--codec libx264 \
-	--crf 20
-
-# package DASH
-python3 scripts/package_dash.py \
-	--inputs artifacts/basic/test_stream_lossy.mp4 \
-	--output artifacts/basic \
-	--fps 60
-
-# serve (terminal A)
-cd server
-go run ./cmd/tigas-server \
-	--cert ../certs/server.crt \
-	--key ../certs/server.key \
-	--static ../client \
-	--segments ../artifacts/basic \
-	--movement ../movement_traces
+	--crf 20 \
+	--live-dash
 ```
-
-Open `https://localhost:4433/` in browser.
 
 ### 2) Interactive mode (planned)
 
-Status: not implemented yet. The current client sends pose datagrams from `movement_traces/Linear.json` automatically.
-
-For now, run the same command sequence as Basic mode. When interactive controls are added, this subsection will include the extra client control step/flags.
+Status: user-input controls (mouse/keyboard camera navigation) are not implemented yet. The current client sends pose datagrams from `movement_traces/Linear.json` automatically.
 
 ### 3) Headless mode (no GUI)
 
@@ -105,7 +155,7 @@ This mode runs server + headless browser and writes artifacts (for example `cont
 ```bash
 cd /Users/manu/Desktop/TIGAS
 
-# prepare stream artifacts first (same as Basic encode/package, minimal example)
+# prepare stream artifacts first (offline prep for headless/test flows)
 native/renderer_encoder/build/tigas_renderer_encoder \
 	--movement movement_traces/Linear.json \
 	--output-dir artifacts/headless \

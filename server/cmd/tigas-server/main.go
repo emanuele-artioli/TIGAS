@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"flag"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -140,7 +139,7 @@ func main() {
 		_ = json.NewEncoder(w).Encode(response)
 	})
 
-	wt := &webtransport.Server{H3: http3.Server{}}
+	wt := &webtransport.Server{H3: &http3.Server{}}
 	mux.HandleFunc("/wt", func(w http.ResponseWriter, r *http.Request) {
 		sess, err := wt.Upgrade(w, r)
 		if err != nil {
@@ -180,7 +179,7 @@ func main() {
 	log.Printf("dash root: %s", filepath.Clean(*segmentsDir))
 
 	if err := h3.ListenAndServeTLS(*certFile, *keyFile); err != nil {
-		fmt.Fprintf(os.Stderr, "server failed: %v\n", err)
+		log.Printf("http/3 server stopped: %v", err)
 		os.Exit(1)
 	}
 }

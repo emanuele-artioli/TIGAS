@@ -1,9 +1,11 @@
 #include <filesystem>
+#include <chrono>
 #include <iostream>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "tigas_encoder.hpp"
@@ -22,6 +24,9 @@ struct Args {
   std::string codec = "h264_nvenc";
   bool prefer_cuda = true;
   std::vector<int> crf_ladder;
+  bool live_dash = false;
+  bool realtime = false;
+  int dash_window_size = 5;
 };
 
 std::vector<int> parse_crf_ladder(const std::string& input) {
@@ -67,6 +72,13 @@ Args parse_args(int argc, char** argv) {
       args.prefer_cuda = false;
     } else if (key == "--crf-ladder") {
       args.crf_ladder = parse_crf_ladder(read_value(key));
+    } else if (key == "--live-dash") {
+      args.live_dash = true;
+      args.realtime = true;
+    } else if (key == "--realtime") {
+      args.realtime = true;
+    } else if (key == "--dash-window-size") {
+      args.dash_window_size = std::stoi(read_value(key));
     } else {
       throw std::runtime_error("Unknown argument: " + key);
     }
@@ -95,17 +107,24 @@ int main(int argc, char** argv) {
     std::cout << "Renderer backend: " << (renderer.is_using_cuda() ? "CUDA" : "CPU") << "\n";
 
     const std::string lossless_path = (std::filesystem::path(args.output_dir) / "ground_truth_lossless.mkv").string();
-    const std::string lossy_path = (std::filesystem::path(args.output_dir) / "test_stream_lossy.mp4").string();
+    const std::string lossy_path = args.live_dash
+                                     ? (std::filesystem::path(args.output_dir) / "stream.mpd").string()
+                                     : (std::filesystem::path(args.output_dir) / "test_stream_lossy.mp4").string();
     const std::string metadata_path = (std::filesystem::path(args.output_dir) / "frame_metadata.csv").string();
 
     tigas::EncodeConfig lossless_cfg{"ffv1", args.fps, 0, true};
     tigas::EncodeConfig lossy_cfg{args.codec, args.fps, args.crf, false};
+    lossy_cfg.live_dash = args.live_dash;
+    lossy_cfg.dash_window_size = args.dash_window_size;
 
-    tigas::VideoEncoder lossless_encoder(lossless_path, lossless_cfg, first_frame.width, first_frame.height);
+    std::unique_ptr<tigas::VideoEncoder> lossless_encoder;
+    if (!args.live_dash) {
+      lossless_encoder = std::make_unique<tigas::VideoEncoder>(lossless_path, lossless_cfg, first_frame.width, first_frame.height);
+    }
     tigas::VideoEncoder lossy_encoder(lossy_path, lossy_cfg, first_frame.width, first_frame.height);
     std::vector<std::unique_ptr<tigas::VideoEncoder>> ladder_encoders;
     std::vector<std::string> ladder_paths;
-    for (size_t idx = 0; idx < args.crf_ladder.size(); ++idx) {
+    for (size_t idx = 0; idx < args.crf_ladder.size() && !args.live_dash; ++idx) {
       const int ladder_crf = args.crf_ladder[idx];
       if (ladder_crf == args.crf) {
         continue;
@@ -116,28 +135,43 @@ int main(int argc, char** argv) {
       ladder_paths.push_back(ladder_path);
     }
     tigas::MetadataWriter metadata_writer(metadata_path);
+    const auto start_clock = std::chrono::steady_clock::now();
 
     for (const auto& sample : movement) {
       auto frame = renderer.render(sample);
       tigas::FrameMetadata metadata{sample.frame_id, sample.t_ms};
 
-      lossless_encoder.encode_frame(frame, metadata);
+      if (lossless_encoder) {
+        lossless_encoder->encode_frame(frame, metadata);
+      }
       lossy_encoder.encode_frame(frame, metadata);
       for (auto& encoder : ladder_encoders) {
         encoder->encode_frame(frame, metadata);
       }
       metadata_writer.append(metadata);
+
+      if (args.realtime) {
+        const auto target = start_clock + std::chrono::milliseconds(sample.t_ms);
+        const auto now = std::chrono::steady_clock::now();
+        if (target > now) {
+          std::this_thread::sleep_until(target);
+        }
+      }
     }
 
-    lossless_encoder.flush();
+    if (lossless_encoder) {
+      lossless_encoder->flush();
+    }
     lossy_encoder.flush();
     for (auto& encoder : ladder_encoders) {
       encoder->flush();
     }
 
     std::cout << "Encoded " << movement.size() << " frames\n";
-    std::cout << "Lossless: " << lossless_path << "\n";
-    std::cout << "Lossy: " << lossy_path << "\n";
+    if (lossless_encoder) {
+      std::cout << "Lossless: " << lossless_path << "\n";
+    }
+    std::cout << (args.live_dash ? "LiveDASH: " : "Lossy: ") << lossy_path << "\n";
     for (const auto& path : ladder_paths) {
       std::cout << "LossyLadder: " << path << "\n";
     }

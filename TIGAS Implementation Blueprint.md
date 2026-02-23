@@ -7,8 +7,16 @@
 TIGAS is an end-to-end, server-side rendering (SSR) pipeline for 3D Gaussian Splatting (3DGS). It delivers ultra-low latency interactive streaming by encoding individual frames as CMAF chunks over a QUIC (HTTP/3) transport layer.  
 The system operates in two distinct modes:
 
-* **Basic Mode (Interactive):** A human user navigates the 3D space via a Chrome GUI. The server renders and streams the viewport in real-time.  
+* **Basic Mode:** Live streaming mode. Rendering, encoding, CMAF chunking, and HTTP/3 delivery run concurrently. The system must not pre-encode full videos and then package them offline before serving.  
 * **Test Mode (Evaluation):** Headless automated execution driven by movement and network trace files, followed by automated VMAF quality evaluation comparing ground-truth lossless renders against network-degraded streams.
+
+### **1.1. Current Implementation Status (Feb 2026)**
+
+* QUIC/HTTP3 transport is implemented with the Go server (`server/cmd/tigas-server`) and serves both static client assets and DASH/CMAF segment files under `/dash/`.
+* Chromium local QUIC access requires SPKI pinning for the dev certificate (`--ignore-certificate-errors-spki-list=<hash>`). `--ignore-certificate-errors` alone is insufficient for QUIC in this environment.
+* CMAF playback validation in Chrome is considered successful when:
+  * `stream.mpd` and `chunk_*.m4s` are requested with HTTP `200`, and
+  * video `currentTime` increases while `paused=false`.
 
 ## **2\. Component Implementation Details**
 
@@ -38,7 +46,7 @@ The client is a web application running in Google Chrome, utilizing native brows
 
 ### **2.2. Network Layer (QUIC / HTTP/3)**
 
-To natively support dash.js requests and WebTransport, the server is fronted by an HTTP/3 capable server layer (e.g., Nginx with quic module or a custom Node.js/Go backend utilizing HTTP/3 libraries).
+To natively support dash.js requests and WebTransport, TIGAS uses a custom Go HTTP/3 server over QUIC.
 
 * All .m4s DASH segment requests and WebTransport control messages share the same underlying UDP QUIC connection, ensuring multiplexing without TCP stream blocking.
 
@@ -57,6 +65,7 @@ This is the most critical latency bottleneck. Bouncing raw frames to disk or thr
     * \-g 1 (GOP size of 1, forcing every frame to be an I-frame/IDR, allowing 1-frame segment independence).  
 * **DASH/CMAF Chunking:**  
   * The encoder outputs strictly **1 frame per CMAF segment**.  
+  * In Basic Mode this chunking is produced live while frames are rendered/encoded; no post-process packaging pass is allowed in the serving path.  
   * **Live Profile MPD:** The MPD uses a SegmentTemplate with $Number$ addressing. This prevents the client from needing to constantly download the MPD.  
     \<\!-- TIGAS MPD Snippet \--\>  
     \<SegmentTemplate timescale="60" initialization="init.mp4" media="chunk\_$Number$.m4s" duration="1" startNumber="1"/\>

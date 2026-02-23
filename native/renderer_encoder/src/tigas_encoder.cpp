@@ -163,7 +163,8 @@ VideoEncoder::VideoEncoder(const std::string& output_path, const EncodeConfig& c
 
 void VideoEncoder::init(const std::string& output_path, const EncodeConfig& config, int width, int height) {
   AVFormatContext* format_ctx = nullptr;
-  if (avformat_alloc_output_context2(&format_ctx, nullptr, nullptr, output_path.c_str()) < 0) {
+  const char* format_name = config.live_dash ? "dash" : nullptr;
+  if (avformat_alloc_output_context2(&format_ctx, nullptr, format_name, output_path.c_str()) < 0) {
     throw std::runtime_error("Failed to allocate output format context");
   }
   format_context_ = format_ctx;
@@ -236,8 +237,28 @@ void VideoEncoder::init(const std::string& output_path, const EncodeConfig& conf
     }
   }
 
-  if (avformat_write_header(format_ctx, nullptr) < 0) {
+  AVDictionary* mux_opts = nullptr;
+  if (config.live_dash) {
+    av_dict_set(&mux_opts, "streaming", "1", 0);
+    av_dict_set(&mux_opts, "ldash", "1", 0);
+    av_dict_set(&mux_opts, "window_size", std::to_string(config.dash_window_size).c_str(), 0);
+    av_dict_set(&mux_opts, "extra_window_size", "0", 0);
+    av_dict_set(&mux_opts, "remove_at_exit", "0", 0);
+    av_dict_set(&mux_opts, "use_timeline", "1", 0);
+    av_dict_set(&mux_opts, "use_template", "1", 0);
+    av_dict_set(&mux_opts, "seg_duration", std::to_string(1.0 / static_cast<double>(config.fps)).c_str(), 0);
+    av_dict_set(&mux_opts, "init_seg_name", config.dash_init_seg_name.c_str(), 0);
+    av_dict_set(&mux_opts, "media_seg_name", config.dash_media_seg_name.c_str(), 0);
+  }
+
+  if (avformat_write_header(format_ctx, mux_opts ? &mux_opts : nullptr) < 0) {
+    if (mux_opts) {
+      av_dict_free(&mux_opts);
+    }
     throw std::runtime_error("Unable to write output header");
+  }
+  if (mux_opts) {
+    av_dict_free(&mux_opts);
   }
 
   AVFrame* frame = av_frame_alloc();
