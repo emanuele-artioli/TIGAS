@@ -13,7 +13,7 @@ This implementation uses native components:
 
 ## Setup (one-time after clone)
 
-Everything in this section is intended to be done once, then reused for all later runs.
+Everything in this section is intended to be done once, right after cloning the repository.
 
 ### 1) Dependencies
 
@@ -22,13 +22,14 @@ Linux + NVIDIA full target:
 - NVIDIA GPU with NVENC support (`h264_nvenc` / `hevc_nvenc`)
 - Linux `tc` (for shaping)
 
-macOS local development is supported with CPU fallback codec (for example `libx264`).
+macOS local development is supported with CPU fallback codec (for example `libx264`). Other setups could also work but have not been tested.
 
 ### 2) Python environment
 
 ```bash
-conda env create -f environment.yaml
 cd /Users/manu/Desktop/TIGAS && conda activate tigas
+
+conda env create -f environment.yaml
 python -m playwright install chromium
 ```
 
@@ -87,6 +88,8 @@ python3 scripts/run_basic_mode.py \
 
 The command prints the MPD URL and launches a QUIC/SPKI-configured Chrome profile directly on the DASH-IF reference player.
 
+The built-in default is DASH-IF reference player auto-launch, but you can copy the printed MPD URL into other dash.js players too.
+
 Because the server is QUIC-only (no TCP fallback), if you launch manually you still need QUIC/SPKI flags:
 
 ```bash
@@ -104,95 +107,9 @@ Notes:
 - The launcher writes a netlog at `/tmp/tigas-quic-netlog-YYYYmmdd-HHMMSS.json` for deeper QUIC diagnostics.
 - By default `run_basic_mode.py` keeps the QUIC server alive for 120 seconds after producer completion (`--linger-seconds`).
 
-#### CMAF playback validation (Chrome, tested)
-
-To confirm DASH/CMAF playback is actually running (not just page load):
-
-1. Start Basic mode (or start `tigas-server` pointing `--segments` to a folder containing `stream.mpd`, `init_*.mp4`, `chunk_*.m4s`).
-2. Launch Chrome with `scripts/launch_quic_chrome.sh https://localhost:4433/`.
-3. Verify these signals:
-   - Network panel shows repeated `GET /dash/stream.mpd` and multiple `GET /dash/chunk_*.m4s` with `200`.
-   - `<video>` advances (`currentTime` keeps increasing) and is not paused.
-   - No `4xx/5xx` on DASH segment requests.
-
-Observed on this macOS environment during validation:
-
-- `stream.mpd` requested repeatedly and `chunk_*.m4s` fetched successfully.
-- Video state reached `readyState=2` and `currentTime` advanced while unpaused.
-
-Note: Chrome console may still show WebTransport handshake errors (`/wt`) during playback-only tests. Those do not block dash.js CMAF video playback verification.
-
-Alternative (manual split terminals):
-
-```bash
-# terminal A: server
-cd /Users/manu/Desktop/TIGAS/server
-go run ./cmd/tigas-server \
-	--cert ../certs/server-chain.crt \
-	--key ../certs/server.key \
-	--static ../client \
-	--segments ../artifacts/basic \
-	--movement ../movement_traces
-
-# terminal C: launch Chrome with QUIC forced + SPKI cert trust
-cd /Users/manu/Desktop/TIGAS
-scripts/launch_quic_chrome.sh https://localhost:4433/
-
-# terminal B: live producer (no offline packaging step)
-cd /Users/manu/Desktop/TIGAS
-native/renderer_encoder/build/tigas_renderer_encoder \
-	--movement movement_traces/Linear.json \
-	--output-dir artifacts/basic \
-	--ply '/Users/manu/Desktop/Datasets/3DGS_PLY_sample_data/PLY(postshot)/cactus_splat3_30kSteps_142k_splats.ply' \
-	--max-frames 300 \
-	--fps 60 \
-	--codec libx264 \
-	--crf 20 \
-	--live-dash
-```
-
 ### 2) Interactive mode (planned)
 
 Status: user-input controls (mouse/keyboard camera navigation) are not implemented yet. The current client sends pose datagrams from `movement_traces/Linear.json` automatically.
-
-### 2.5) External dash.js players
-
-Basic mode exposes the live MPD and CMAF chunks with CORS headers, so any external dash.js player can load them.
-
-The built-in default is DASH-IF reference player auto-launch, but you can copy the printed MPD URL into other dash.js players too.
-
-```bash
-cd /Users/manu/Desktop/TIGAS && conda activate tigas
-
-python3 scripts/run_basic_mode.py \
-	--movement movement_traces/Linear.json \
-	--ply '/Users/manu/Desktop/Datasets/3DGS_PLY_sample_data/PLY(postshot)/cactus_splat3_30kSteps_142k_splats.ply' \
-	--output artifacts/basic \
-	--max-frames 1800 \
-	--fps 60 \
-	--codec libx264 \
-	--crf 20
-```
-
-Then:
-
-1. Open the DASH-IF player: `https://reference.dashif.org/dash.js/nightly/samples/dash-if-reference-player/index.html`
-2. Paste: `https://localhost:4433/dash/stream.mpd` (or the exact URL printed by `run_basic_mode.py`)
-3. Start playback.
-
-Notes:
-
-- The MPD/chunk URLs must be served over HTTPS (not `file://`).
-- For `reference.dashif.org`, TIGAS launcher applies compatibility flags in an isolated temporary Chrome profile to permit loopback access to `https://localhost:4433`.
-- TIGAS automatically enables archive-style DASH (effectively `--dash-archive-mode` with `--dash-window-size 0`) so older segments remain seekable from the MPD.
-- If needed, override CORS origin with `--dash-cors-origin 'https://reference.dashif.org'`.
-- For local testing convenience, default CORS in this mode is `*`.
-
-If you want archive seekability without the external reference player workflow, run with:
-
-```bash
-python3 scripts/run_basic_mode.py ... --dash-archive-mode --dash-window-size 0
-```
 
 ### 3) Headless mode (no GUI)
 
