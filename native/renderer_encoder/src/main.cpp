@@ -27,6 +27,7 @@ struct Args {
   bool live_dash = false;
   bool realtime = false;
   int dash_window_size = 5;
+  bool dash_archive_mode = false;
 };
 
 std::vector<int> parse_crf_ladder(const std::string& input) {
@@ -79,6 +80,8 @@ Args parse_args(int argc, char** argv) {
       args.realtime = true;
     } else if (key == "--dash-window-size") {
       args.dash_window_size = std::stoi(read_value(key));
+    } else if (key == "--dash-archive-mode") {
+      args.dash_archive_mode = true;
     } else {
       throw std::runtime_error("Unknown argument: " + key);
     }
@@ -116,6 +119,7 @@ int main(int argc, char** argv) {
     tigas::EncodeConfig lossy_cfg{args.codec, args.fps, args.crf, false};
     lossy_cfg.live_dash = args.live_dash;
     lossy_cfg.dash_window_size = args.dash_window_size;
+    lossy_cfg.dash_archive_mode = args.dash_archive_mode;
 
     std::unique_ptr<tigas::VideoEncoder> lossless_encoder;
     if (!args.live_dash) {

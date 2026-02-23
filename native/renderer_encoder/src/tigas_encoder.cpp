@@ -240,15 +240,19 @@ void VideoEncoder::init(const std::string& output_path, const EncodeConfig& conf
   AVDictionary* mux_opts = nullptr;
   if (config.live_dash) {
     av_dict_set(&mux_opts, "streaming", "1", 0);
-    av_dict_set(&mux_opts, "ldash", "1", 0);
+    av_dict_set(&mux_opts, "ldash", config.dash_archive_mode ? "0" : "1", 0);
     av_dict_set(&mux_opts, "window_size", std::to_string(config.dash_window_size).c_str(), 0);
-    av_dict_set(&mux_opts, "extra_window_size", "0", 0);
+    av_dict_set(&mux_opts, "extra_window_size", config.dash_archive_mode ? "0" : "0", 0);
     av_dict_set(&mux_opts, "remove_at_exit", "0", 0);
     av_dict_set(&mux_opts, "use_timeline", "1", 0);
     av_dict_set(&mux_opts, "use_template", "1", 0);
     av_dict_set(&mux_opts, "seg_duration", std::to_string(1.0 / static_cast<double>(config.fps)).c_str(), 0);
     av_dict_set(&mux_opts, "init_seg_name", config.dash_init_seg_name.c_str(), 0);
     av_dict_set(&mux_opts, "media_seg_name", config.dash_media_seg_name.c_str(), 0);
+
+    if (config.dash_archive_mode) {
+      av_dict_set(&mux_opts, "window_size", "0", 0);
+    }
   }
 
   if (avformat_write_header(format_ctx, mux_opts ? &mux_opts : nullptr) < 0) {

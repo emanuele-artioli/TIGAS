@@ -2,11 +2,12 @@
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 https://localhost:PORT/"
+  echo "Usage: $0 <open-url> [force-quic-origin host:port]"
   exit 1
 fi
 
 URL="$1"
+FORCE_QUIC_ORIGIN="${2:-}"
 
 if [[ "$URL" != https://* ]]; then
   echo "URL must start with https://"
@@ -25,8 +26,13 @@ else
   exit 1
 fi
 
-hostport="${URL#https://}"
-hostport="${hostport%%/*}"
+url_hostport="${URL#https://}"
+url_hostport="${url_hostport%%/*}"
+
+hostport="$url_hostport"
+if [[ -n "$FORCE_QUIC_ORIGIN" ]]; then
+  hostport="$FORCE_QUIC_ORIGIN"
+fi
 
 host=""
 port=""
@@ -71,6 +77,7 @@ fi
 PROFILE_DIR="$(mktemp -d /tmp/tigas-quic-profile.XXXXXX)"
 NETLOG_PATH="/tmp/tigas-quic-netlog-$(date +%Y%m%d-%H%M%S).json"
 echo "Using Chrome profile: $PROFILE_DIR"
+echo "Open URL: $URL"
 echo "Forcing QUIC origin: $hostport"
 echo "SPKI hash: $SPKI_HASH"
 echo "Netlog: $NETLOG_PATH"
@@ -88,6 +95,14 @@ ARGS=(
   --net-log-capture-mode=Everything
   "$URL"
 )
+
+if [[ "$URL" == https://reference.dashif.org/* ]]; then
+  ARGS+=(
+    --disable-web-security
+    --allow-running-insecure-content
+  )
+  echo "Applied loopback access compatibility flags for external reference player."
+fi
 
 "$CHROME_BIN" "${ARGS[@]}" >/tmp/tigas-quic-chrome.log 2>&1 &
 disown

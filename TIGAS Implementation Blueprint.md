@@ -17,6 +17,7 @@ The system operates in two distinct modes:
 * CMAF playback validation in Chrome is considered successful when:
   * `stream.mpd` and `chunk_*.m4s` are requested with HTTP `200`, and
   * video `currentTime` increases while `paused=false`.
+* Basic mode now auto-launches the DASH-IF reference player and enables DASH CORS exposure (`--dash-cors-origin`) so external players can consume `https://localhost:<port>/dash/stream.mpd` and related chunks.
 
 ## **2\. Component Implementation Details**
 

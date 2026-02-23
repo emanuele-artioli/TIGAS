@@ -79,6 +79,7 @@ func main() {
 	addr := flag.String("addr", ":4433", "HTTP/3 listen address")
 	certFile := flag.String("cert", "", "TLS certificate path")
 	keyFile := flag.String("key", "", "TLS key path")
+	dashCORSOrigin := flag.String("dash-cors-origin", "", "CORS Access-Control-Allow-Origin for /dash/* (empty disables CORS)")
 	staticDir := flag.String("static", "../client", "Static assets path")
 	segmentsDir := flag.String("segments", "../artifacts/test_mode", "DASH segments path")
 	movementDir := flag.String("movement", "../movement_traces", "Movement traces path")
@@ -108,6 +109,20 @@ func main() {
 	mux.Handle("/", http.FileServer(http.Dir(*staticDir)))
 	dashFileServer := http.StripPrefix("/dash/", http.FileServer(http.Dir(*segmentsDir)))
 	mux.Handle("/dash/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if *dashCORSOrigin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", *dashCORSOrigin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET,HEAD,OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Range,Content-Type,Origin,Accept")
+			w.Header().Set("Access-Control-Expose-Headers", "Content-Length,Content-Range,Accept-Ranges")
+			w.Header().Set("Access-Control-Allow-Private-Network", "true")
+			w.Header().Set("Vary", "Origin")
+		}
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
 		start := time.Now()
 		dashFileServer.ServeHTTP(w, r)
 
@@ -177,6 +192,9 @@ func main() {
 	log.Printf("serving TIGAS over HTTP/3 on %s", *addr)
 	log.Printf("static root: %s", filepath.Clean(*staticDir))
 	log.Printf("dash root: %s", filepath.Clean(*segmentsDir))
+	if *dashCORSOrigin != "" {
+		log.Printf("dash CORS enabled: Access-Control-Allow-Origin=%s", *dashCORSOrigin)
+	}
 
 	if err := h3.ListenAndServeTLS(*certFile, *keyFile); err != nil {
 		log.Printf("http/3 server stopped: %v", err)

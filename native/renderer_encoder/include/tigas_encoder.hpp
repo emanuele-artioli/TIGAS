@@ -15,6 +15,7 @@ struct EncodeConfig {
   bool lossless;
   bool live_dash = false;
   int dash_window_size = 5;
+  bool dash_archive_mode = false;
   std::string dash_init_seg_name = "init_$RepresentationID$.mp4";
   std::string dash_media_seg_name = "chunk_$RepresentationID$_$Number$.m4s";
 };

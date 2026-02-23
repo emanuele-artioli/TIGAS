@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import subprocess
 import time
+import urllib.parse
 from pathlib import Path
 
 
@@ -33,7 +36,13 @@ def main() -> int:
     parser.add_argument("--addr", default=":4433")
     parser.add_argument("--cert", default=Path("certs/server-chain.crt"), type=Path)
     parser.add_argument("--key", default=Path("certs/server.key"), type=Path)
+    parser.add_argument("--dash-cors-origin", default="*", help="Access-Control-Allow-Origin value for /dash/* (needed for external dash.js players)")
+    parser.add_argument("--dash-archive-mode", action="store_true", help="Keep full DASH history in MPD and on disk for seeking")
     args = parser.parse_args()
+
+    args.dash_archive_mode = True
+    if args.dash_window_size > 0:
+        args.dash_window_size = 0
 
     repo_root = Path(__file__).resolve().parents[1]
     output_dir = (repo_root / args.output).resolve()
@@ -49,7 +58,6 @@ def main() -> int:
     if spki_file.exists():
         spki_hash = spki_file.read_text().strip()
     else:
-        import hashlib, base64
         spki_der = subprocess.run(
             ["openssl", "x509", "-in", str(cert_path), "-pubkey", "-noout"],
             capture_output=True, text=True, check=True
@@ -81,6 +89,8 @@ def main() -> int:
         str((repo_root / "movement_traces").resolve()),
         "--control-log",
         str((output_dir / "control_messages.bin").resolve()),
+        "--dash-cors-origin",
+        args.dash_cors_origin,
     ], cwd=repo_root / "server")
 
     try:
@@ -114,12 +124,31 @@ def main() -> int:
             "--live-dash",
             "--dash-window-size",
             str(args.dash_window_size),
+            *( ["--dash-archive-mode"] if args.dash_archive_mode else []),
             *( ["--disable-cuda"] if args.disable_cuda else []),
         ]
         listen_addr = args.addr if args.addr.startswith(':') else f':{args.addr}'
+        mpd_url = f"https://localhost{listen_addr}/dash/stream.mpd"
+        reference_url = (
+            "https://reference.dashif.org/dash.js/nightly/samples/dash-if-reference-player/index.html"
+            f"?mpd={urllib.parse.quote(mpd_url, safe='')}"
+            "&autoLoad=true&autoPlay=true&muted=true"
+        )
+
         print(f"Server ready at https://localhost{listen_addr}/")
-        print(f"Launch Chrome with:  --origin-to-force-quic-on=localhost{listen_addr}  --ignore-certificate-errors-spki-list={spki_hash}")
-        print(f"  Or run:  bash scripts/launch_quic_chrome.sh https://localhost{listen_addr}/")
+        print("Basic mode now uses the DASH-IF reference player by default.")
+        print("Seekable archive enabled: full DASH history kept in MPD and segment files.")
+        print(f"MPD URL: {mpd_url}")
+        print("This MPD is generic and can be used by any dash.js player, not only the reference player.")
+
+        run_cmd([
+            "bash",
+            "scripts/launch_quic_chrome.sh",
+            reference_url,
+            f"localhost{listen_addr}",
+        ], cwd=repo_root)
+
+        print("Opened Chrome profile configured for local QUIC/SPKI trust and reference player autoload.")
         run_cmd(renderer_cmd, cwd=repo_root)
         listen_port = args.addr if args.addr.startswith(":") else f":{args.addr}"
         if args.linger_seconds > 0 and server_proc.poll() is None:

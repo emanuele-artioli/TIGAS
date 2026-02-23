@@ -28,13 +28,15 @@ macOS local development is supported with CPU fallback codec (for example `libx2
 
 ```bash
 conda env create -f environment.yaml
-conda activate tigas
+cd /Users/manu/Desktop/TIGAS && conda activate tigas
 python -m playwright install chromium
 ```
 
 ### 3) Renderer build
 
 ```bash
+cd /Users/manu/Desktop/TIGAS && conda activate tigas
+
 cmake -S native/renderer_encoder -B native/renderer_encoder/build
 cmake --build native/renderer_encoder/build -j
 ```
@@ -42,6 +44,8 @@ cmake --build native/renderer_encoder/build -j
 ### 4) Dev certificates (for HTTPS/HTTP3 local runs)
 
 ```bash
+cd /Users/manu/Desktop/TIGAS && conda activate tigas
+
 bash scripts/generate_dev_cert.sh certs
 ```
 
@@ -52,6 +56,8 @@ Chrome requires this hash via `--ignore-certificate-errors-spki-list=<hash>` —
 ### 5) Go modules
 
 ```bash
+cd /Users/manu/Desktop/TIGAS && conda activate tigas
+
 cd server
 go mod tidy
 cd ..
@@ -64,6 +70,7 @@ Each mode below is self-contained with the commands needed to run it.
 ### 1) Basic mode
 
 Basic mode is live by design: rendering, encoding, CMAF chunk creation, and HTTP/3 serving happen concurrently.
+It now auto-opens Chrome on the DASH-IF reference player, preloaded with your local MPD.
 
 ```bash
 cd /Users/manu/Desktop/TIGAS && conda activate tigas
@@ -78,12 +85,12 @@ python3 scripts/run_basic_mode.py \
 	--crf 20
 ```
 
-Open `https://localhost:4433/` while the command is running.
+The command prints the MPD URL and launches a QUIC/SPKI-configured Chrome profile directly on the DASH-IF reference player.
 
-Because the server is QUIC-only (no TCP fallback), launch Chrome with QUIC forced for the origin:
+Because the server is QUIC-only (no TCP fallback), if you launch manually you still need QUIC/SPKI flags:
 
 ```bash
-cd /Users/manu/Desktop/TIGAS
+cd /Users/manu/Desktop/TIGAS && conda activate tigas
 scripts/launch_quic_chrome.sh https://localhost:4433/
 ```
 
@@ -147,6 +154,45 @@ native/renderer_encoder/build/tigas_renderer_encoder \
 ### 2) Interactive mode (planned)
 
 Status: user-input controls (mouse/keyboard camera navigation) are not implemented yet. The current client sends pose datagrams from `movement_traces/Linear.json` automatically.
+
+### 2.5) External dash.js players
+
+Basic mode exposes the live MPD and CMAF chunks with CORS headers, so any external dash.js player can load them.
+
+The built-in default is DASH-IF reference player auto-launch, but you can copy the printed MPD URL into other dash.js players too.
+
+```bash
+cd /Users/manu/Desktop/TIGAS && conda activate tigas
+
+python3 scripts/run_basic_mode.py \
+	--movement movement_traces/Linear.json \
+	--ply '/Users/manu/Desktop/Datasets/3DGS_PLY_sample_data/PLY(postshot)/cactus_splat3_30kSteps_142k_splats.ply' \
+	--output artifacts/basic \
+	--max-frames 1800 \
+	--fps 60 \
+	--codec libx264 \
+	--crf 20
+```
+
+Then:
+
+1. Open the DASH-IF player: `https://reference.dashif.org/dash.js/nightly/samples/dash-if-reference-player/index.html`
+2. Paste: `https://localhost:4433/dash/stream.mpd` (or the exact URL printed by `run_basic_mode.py`)
+3. Start playback.
+
+Notes:
+
+- The MPD/chunk URLs must be served over HTTPS (not `file://`).
+- For `reference.dashif.org`, TIGAS launcher applies compatibility flags in an isolated temporary Chrome profile to permit loopback access to `https://localhost:4433`.
+- TIGAS automatically enables archive-style DASH (effectively `--dash-archive-mode` with `--dash-window-size 0`) so older segments remain seekable from the MPD.
+- If needed, override CORS origin with `--dash-cors-origin 'https://reference.dashif.org'`.
+- For local testing convenience, default CORS in this mode is `*`.
+
+If you want archive seekability without the external reference player workflow, run with:
+
+```bash
+python3 scripts/run_basic_mode.py ... --dash-archive-mode --dash-window-size 0
+```
 
 ### 3) Headless mode (no GUI)
 
