@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import os
+import signal
 import subprocess
 import time
 import urllib.parse
@@ -18,7 +20,124 @@ def run_cmd(cmd: list[str], cwd: Path | None = None) -> None:
 
 
 def spawn(cmd: list[str], cwd: Path | None = None) -> subprocess.Popen:
-    return subprocess.Popen(cmd, cwd=cwd)
+    return subprocess.Popen(cmd, cwd=cwd, start_new_session=True)
+
+
+def stop_process_group(proc: subprocess.Popen, timeout_seconds: float = 10.0) -> None:
+    try:
+        pgid = os.getpgid(proc.pid)
+    except ProcessLookupError:
+        return
+
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+
+    try:
+        proc.wait(timeout=timeout_seconds)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+
+    try:
+        proc.wait(timeout=3.0)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def parse_port(addr: str) -> int:
+    value = addr.strip()
+    if value.startswith(":"):
+        value = value[1:]
+    if not value or not value.isdigit():
+        raise RuntimeError(f"Invalid --addr value: {addr}. Expected ':PORT' or 'PORT'.")
+    return int(value)
+
+
+def command_name_for_pid(pid: int) -> str:
+    result = subprocess.run(
+        ["ps", "-o", "comm=", "-p", str(pid)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip().split("/")[-1]
+
+
+def pids_on_port(port: int) -> list[int]:
+    result = subprocess.run(
+        ["lsof", "-nP", "-t", f"-iUDP:{port}", f"-iTCP:{port}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0 and not result.stdout.strip():
+        return []
+
+    pids: list[int] = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.isdigit():
+            pids.append(int(line))
+    return sorted(set(pids))
+
+
+def terminate_pid(pid: int, timeout_seconds: float = 5.0) -> None:
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        try:
+            os.kill(pid, 0)
+            time.sleep(0.1)
+        except ProcessLookupError:
+            return
+
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+
+
+def cleanup_stale_tigas_server(addr: str) -> None:
+    port = parse_port(addr)
+    stale_pids = pids_on_port(port)
+    if not stale_pids:
+        return
+
+    allowed_commands = {"tigas-ser", "tigas-server", "go"}
+    blocked: list[tuple[int, str]] = []
+
+    for pid in stale_pids:
+        cmd_name = command_name_for_pid(pid)
+        if cmd_name in allowed_commands:
+            print(f"Detected stale TIGAS listener on :{port} (pid={pid}, cmd={cmd_name}). Terminating it.")
+            terminate_pid(pid)
+        else:
+            blocked.append((pid, cmd_name or "unknown"))
+
+    still_busy = pids_on_port(port)
+    if still_busy:
+        detail = ", ".join(f"pid={pid}" for pid in still_busy)
+        if blocked:
+            blocked_detail = ", ".join(f"pid={pid} cmd={cmd}" for pid, cmd in blocked)
+            raise RuntimeError(
+                f"Port :{port} is busy by non-TIGAS process(es): {blocked_detail}. Free the port manually, then retry."
+            )
+        raise RuntimeError(f"Port :{port} remains busy after cleanup attempt ({detail}).")
 
 
 def main() -> int:
@@ -70,6 +189,8 @@ def main() -> int:
 
     run_cmd(["cmake", "-S", "native/renderer_encoder", "-B", "native/renderer_encoder/build"], cwd=repo_root)
     run_cmd(["cmake", "--build", "native/renderer_encoder/build", "-j"], cwd=repo_root)
+
+    cleanup_stale_tigas_server(args.addr)
 
     server_proc = spawn([
         "/opt/homebrew/bin/go" if Path("/opt/homebrew/bin/go").exists() else "go",
@@ -158,9 +279,7 @@ def main() -> int:
         print(f"Artifacts: {output_dir}")
         return 0
     finally:
-        if server_proc.poll() is None:
-            server_proc.terminate()
-            server_proc.wait(timeout=10)
+        stop_process_group(server_proc)
 
 
 if __name__ == "__main__":
