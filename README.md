@@ -4,27 +4,27 @@
 
 Thin-Client Interactive Gaussian Adaptive Streaming over HTTP/3.
 
-This implementation follows the blueprint architecture with native components:
+This implementation uses native components:
 
-- **Native renderer/encoder** (`native/renderer_encoder`): C++17, FFmpeg libavcodec/libavformat, NVENC-first encoding path, GOP=1 and no B-frames.
-	- CUDA path (when `CUDAToolkit` + GPU are available) with automatic CPU fallback.
-- **Transport server** (`server`): HTTP/3 + WebTransport over QUIC, shared origin for DASH chunks and control datagrams.
-- **Browser client** (`client`): dash.js ULL playback + WebTransport datagram 6DoF control channel.
-- **Evaluation** (`evaluation`): true `libvmaf` via FFmpeg.
-- **Orchestration scripts** (`scripts`): build, package CMAF DASH, run test mode, headless client, network shaping (`tc`).
+- Native renderer/encoder (`native/renderer_encoder`): C++17 + FFmpeg, GOP=1 and no B-frames.
+- Transport server (`server`): HTTP/3 + WebTransport over QUIC.
+- Browser client (`client`): dash.js player + WebTransport control datagrams.
+- Evaluation (`evaluation`): true `libvmaf` via FFmpeg.
 
-## Dependencies
+## Setup (one-time after clone)
 
-### Linux + NVIDIA (full pipeline)
+Everything in this section is intended to be done once, then reused for all later runs.
+
+### 1) Dependencies
+
+Linux + NVIDIA full target:
 
 - NVIDIA GPU with NVENC support (`h264_nvenc` / `hevc_nvenc`)
-- FFmpeg 6+ with `libvmaf`
-- CMake 3.20+
-- Go 1.23+
-- Chrome/Chromium
-- Linux `tc` (for trace-based network shaping)
+- Linux `tc` (for shaping)
 
-### Python tooling
+macOS local development is supported with CPU fallback codec (for example `libx264`).
+
+### 2) Python environment
 
 ```bash
 conda env create -f environment.yaml
@@ -32,125 +32,155 @@ conda activate tigas
 python -m playwright install chromium
 ```
 
-## Build native renderer/encoder
+### 3) Renderer build
 
 ```bash
 cmake -S native/renderer_encoder -B native/renderer_encoder/build
 cmake --build native/renderer_encoder/build -j
 ```
 
-Binary output:
-
-- `native/renderer_encoder/build/tigas_renderer_encoder`
-
-## Run end-to-end test mode (native + true VMAF)
-
-```bash
-python3 scripts/run_test_mode.py \
-	--movement movement_traces/Linear.json \
-	--network network_traces/lte.csv \
-	--ply /Users/manu/Desktop/Datasets/3DGS_PLY_sample_data/PLY(postshot)/cactus_splat3_30kSteps_142k_splats.ply \
-	--output artifacts/test_mode \
-	--codec h264_nvenc \
-	--max-frames 1200
-```
-
-To force CPU fallback even on CUDA-capable systems:
-
-```bash
-python3 scripts/run_test_mode.py ... --disable-cuda
-```
-
-To enforce strict per-frame SEI mapping as a hard gate:
-
-```bash
-python3 scripts/run_test_mode.py ... --require-sei-strict
-```
-
-Outputs:
-
-- `artifacts/test_mode/ground_truth_lossless.mkv`
-- `artifacts/test_mode/test_stream_lossy.mp4`
-- `artifacts/test_mode/frame_metadata.csv`
-- `artifacts/test_mode/sei_messages.json`
-- `artifacts/test_mode/sei_mapping_report.json`
-- `artifacts/test_mode/alignment_report.json`
-- `artifacts/test_mode/stream.mpd` and `chunk_*.m4s`
-- `artifacts/test_mode/vmaf_results.json`
-- `artifacts/test_mode/summary.json`
-
-Exit code:
-
-- `0` when `vmaf_mean >= 80`
-- `2` when below threshold or when frame alignment check fails
-
-## Full stack headless test mode
-
-This run executes: native encode/eval -> HTTP/3+WebTransport server -> headless browser client.
-
-```bash
-python3 scripts/run_full_stack_test_mode.py \
-	--movement movement_traces/Linear.json \
-	--network network_traces/lte.csv \
-	--ply /Users/manu/Desktop/Datasets/3DGS_PLY_sample_data/PLY(postshot)/cactus_splat3_30kSteps_142k_splats.ply \
-	--output artifacts/full_stack_test \
-	--codec libx264 \
-	--max-frames 300 \
-	--duration 25
-```
-
-By default, headless browser errors are recorded in `headless_status.json` and do not fail the run.
-Use strict mode to fail on headless issues:
-
-```bash
-python3 scripts/run_full_stack_test_mode.py ... --strict-headless
-```
-
-To enforce strict SEI mapping in full-stack mode:
-
-```bash
-python3 scripts/run_full_stack_test_mode.py ... --require-sei-strict
-```
-
-Optional Linux shaping in the same run:
-
-```bash
-python3 scripts/run_full_stack_test_mode.py ... --use-network-shaping --interface eth0
-```
-
-## HTTP/3 + WebTransport server
-
-Generate local TLS certs:
+### 4) Dev certificates (for HTTPS/HTTP3 local runs)
 
 ```bash
 bash scripts/generate_dev_cert.sh certs
 ```
 
-Run server:
+### 5) Go modules
 
 ```bash
 cd server
 go mod tidy
+cd ..
+```
+
+## Running
+
+Each mode below is self-contained with the commands needed to run it.
+
+### 1) Basic mode (trace-driven playback in DASH player)
+
+This mode renders/encodes from movement trace + PLY, packages DASH, serves via HTTP/3, and displays in browser.
+
+```bash
+cd /Users/manu/Desktop/TIGAS
+
+# render + encode (lossy) + metadata
+native/renderer_encoder/build/tigas_renderer_encoder \
+	--movement movement_traces/Linear.json \
+	--output-dir artifacts/basic \
+	--ply '/Users/manu/Desktop/Datasets/3DGS_PLY_sample_data/PLY(postshot)/cactus_splat3_30kSteps_142k_splats.ply' \
+	--max-frames 300 \
+	--fps 60 \
+	--codec libx264 \
+	--crf 20
+
+# package DASH
+python3 scripts/package_dash.py \
+	--inputs artifacts/basic/test_stream_lossy.mp4 \
+	--output artifacts/basic \
+	--fps 60
+
+# serve (terminal A)
+cd server
 go run ./cmd/tigas-server \
 	--cert ../certs/server.crt \
 	--key ../certs/server.key \
 	--static ../client \
-	--segments ../artifacts/test_mode \
+	--segments ../artifacts/basic \
 	--movement ../movement_traces
 ```
 
-ABR policy endpoint:
+Open `https://localhost:4433/` in browser.
 
-- `GET /abr-profile` returns the current profile (`p0..p3`) and EWMA-estimated bandwidth (`estimated_kbps`) computed from DASH chunk delivery observations.
-- The web client polls this endpoint and applies profile-driven representation selection (`p0` lowest quality through `p3` highest quality).
+### 2) Interactive mode (planned)
 
-## Headless browser execution
+Status: not implemented yet. The current client sends pose datagrams from `movement_traces/Linear.json` automatically.
+
+For now, run the same command sequence as Basic mode. When interactive controls are added, this subsection will include the extra client control step/flags.
+
+### 3) Headless mode (no GUI)
+
+This mode runs server + headless browser and writes artifacts (for example `control_messages.bin`, `headless_status.json`) without opening a visible UI.
 
 ```bash
-python3 scripts/headless_client.py --url https://localhost:4433/ --duration 60 --insecure
+cd /Users/manu/Desktop/TIGAS
+
+# prepare stream artifacts first (same as Basic encode/package, minimal example)
+native/renderer_encoder/build/tigas_renderer_encoder \
+	--movement movement_traces/Linear.json \
+	--output-dir artifacts/headless \
+	--ply '/Users/manu/Desktop/Datasets/3DGS_PLY_sample_data/PLY(postshot)/cactus_splat3_30kSteps_142k_splats.ply' \
+	--max-frames 240 \
+	--fps 60 \
+	--codec libx264 \
+	--crf 22
+
+python3 scripts/package_dash.py \
+	--inputs artifacts/headless/test_stream_lossy.mp4 \
+	--output artifacts/headless \
+	--fps 60
+
+# start server (terminal A)
+cd server
+go run ./cmd/tigas-server \
+	--cert ../certs/server.crt \
+	--key ../certs/server.key \
+	--static ../client \
+	--segments ../artifacts/headless \
+	--movement ../movement_traces \
+	--control-log ../artifacts/headless/control_messages.bin
+
+# run headless browser (terminal B)
+cd ..
+python3 scripts/headless_client.py \
+	--url https://localhost:4433/ \
+	--duration 25 \
+	--insecure \
+	--status-output artifacts/headless/headless_status.json
 ```
 
-## Network shaping (`tc`, Linux only)
+### 4) Test mode (headless + ground truth + quality evaluation)
+
+This is the end-to-end quality gate mode.
+
+```bash
+cd /Users/manu/Desktop/TIGAS
+
+python3 scripts/run_test_mode.py \
+	--movement movement_traces/Linear.json \
+	--network network_traces/lte.csv \
+	--ply '/Users/manu/Desktop/Datasets/3DGS_PLY_sample_data/PLY(postshot)/cactus_splat3_30kSteps_142k_splats.ply' \
+	--output artifacts/test_mode \
+	--codec h264_nvenc \
+	--max-frames 1200
+```
+
+Useful options:
+
+```bash
+# CPU fallback
+python3 scripts/run_test_mode.py ... --codec libx264 --disable-cuda
+
+# strict per-frame SEI gate
+python3 scripts/run_test_mode.py ... --require-sei-strict
+```
+
+Expected key outputs:
+
+- `artifacts/test_mode/ground_truth_lossless.mkv`
+- `artifacts/test_mode/test_stream_lossy.mp4`
+- `artifacts/test_mode/stream.mpd`
+- `artifacts/test_mode/vmaf_results.json`
+- `artifacts/test_mode/summary.json`
+
+Exit code:
+
+- `0` when quality/alignment gates pass
+- `2` when gates fail
+
+## Extra commands and comments
+
+### `tc` shaping (Linux only)
 
 ```bash
 sudo python3 scripts/network_shaper.py \
@@ -159,38 +189,34 @@ sudo python3 scripts/network_shaper.py \
 	--latency-ms 50 \
 	--loss-percent 1.0
 
-# optional: stop after N seconds of trace replay
+# stop after N seconds
 sudo python3 scripts/network_shaper.py \
 	--interface eth0 \
 	--trace network_traces/lte.csv \
 	--max-seconds 120
 
-# cleanup qdisc state only
-sudo python3 scripts/network_shaper.py --interface eth0 --trace network_traces/lte.csv --cleanup-only
+# cleanup only
+sudo python3 scripts/network_shaper.py \
+	--interface eth0 \
+	--trace network_traces/lte.csv \
+	--cleanup-only
 ```
 
-## Tests
+### Tests
 
 ```bash
-PYTHONPATH=. pytest -q
+PYTHONPATH=. python3 -m pytest -q
 ```
 
-## CI
+### CI
 
-GitHub Actions workflow is defined in `.github/workflows/ci.yml` with:
+Workflow is in `.github/workflows/ci.yml`:
 
-- `cpu-native-vmaf`: always runs on `ubuntu-latest`, builds native pipeline with `libx264`, computes true VMAF, and fails when `vmaf_mean < 80`.
-- `nvenc-native-vmaf`: optional (`workflow_dispatch` input `run_nvenc=true`) on `self-hosted,linux,x64,nvidia`, validates `h264_nvenc` + true VMAF.
+- `cpu-native-vmaf` on `ubuntu-latest`
+- optional `nvenc-native-vmaf` on self-hosted Linux NVIDIA runner
 
-PR quality comments:
+### Notes
 
-- CPU job auto-comments on pull requests.
-- NVENC manual runs can update the same PR comment by passing `pr_number` in `workflow_dispatch`.
-
-The workflow uses `assets/sample_cube_ascii.ply` as an in-repo deterministic CI asset.
-
-## Notes
-
-- `tc` shaping and NVENC require Linux + NVIDIA; on macOS, use a fallback codec (e.g. `libx264` or `h264_videotoolbox`) for local functional validation.
-- The server and client are structured so DASH requests and WebTransport datagrams share QUIC/HTTP3 as required by the blueprint.
-- The native renderer parses both ASCII and binary little-endian PLY vertex buffers and derives color from either RGB properties or 3DGS `f_dc_*` coefficients.
+- On macOS, prefer `libx264` for local runs.
+- If server fails with `bind: address already in use`, free port `4433` first.
+- Client ABR profile endpoint is `GET /abr-profile`.
