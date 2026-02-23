@@ -29,10 +29,10 @@ type controlStore struct {
 }
 
 type abrState struct {
-	mu                 sync.Mutex
-	ewmaBandwidthKbps  float64
-	currentProfile     string
-	lastUpdate         time.Time
+	mu                sync.Mutex
+	ewmaBandwidthKbps float64
+	currentProfile    string
+	lastUpdate        time.Time
 }
 
 func (s *controlStore) append(msg []byte) {
@@ -131,9 +131,9 @@ func main() {
 	mux.HandleFunc("/abr-profile", func(w http.ResponseWriter, r *http.Request) {
 		profile, kbps, updatedAt := abr.snapshot()
 		response := map[string]any{
-			"profile": profile,
+			"profile":        profile,
 			"estimated_kbps": kbps,
-			"updated_at": updatedAt.Format(time.RFC3339Nano),
+			"updated_at":     updatedAt.Format(time.RFC3339Nano),
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(response)
