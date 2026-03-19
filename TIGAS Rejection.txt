@@ -1,0 +1,73 @@
+﻿NOSSDAV '26 Paper #38 Reviews and Comments
+===========================================================================
+Paper #38 Thin-Client Interactive Gaussian Adaptive Streaming over HTTP/3
+Review #38A
+===========================================================================
+Overall merit
+-------------
+3. Weak accept
+Reviewer expertise
+------------------
+2. Some familiarity
+Paper summary
+-------------
+This paper proposes a remote rendering framework called TIGAS, which offloads the heavy lifting of rasterization to the backend. TIGAS can decouple visual fidelity from client hardware,
+enabling real-time, 6DoF navigation on commodity device.
+Comments for authors
+--------------------
+1. On the resource-intensive remote GPU side, the workload remains heavy, and GPU-accelerated rendering still places high demands on server resources.
+2. The paper only uses the "Western Pacific Train" dataset for evaluation and does not cover diverse 3DGS scenes with varying complexity, texture richness, or lighting conditions.
+3. TIGAS only handles static 3D Gaussian scenes and does not consider dynamic objects or real-time updates of 3DGS models.
+4. The experiment only simulated a single-user scenario and did not test rendering latency, GPU utilization, or system scalability when multiple users simultaneously access the same backend.
+Review #38B
+===========================================================================
+Overall merit
+-------------
+2. Weak reject
+Reviewer expertise
+------------------
+3. Knowledgeable
+Paper summary
+-------------
+This paper proposes TIGAS, a thin-client system that streams interactive 3D Gaussian Splatting scenes by keeping the full 3DGS model on a GPU server and sending the client per-view rendered 2D images (JPEG) over QUIC based on the user’s pose updates.
+It includes a receiver-driven ABR scheme that picks among a small set of quality levels to keep per-request latency near a 100 ms target while preserving visual quality under changing network conditions, and evaluates the approach on a 3DGS scene with network traces against adapted low-latency ABR baselines
+Comments for authors
+--------------------
+The paper mainly reads as implementation work: streaming remotely rendered 3DGS images to a thin client is a straightforward system design, using HTTP/3/QUIC is not a novel choice, and the ABR logic appears to be a standard latency-targeted adaptation rather than a new algorithm.
+The work doesn’t really solve motion-to-photon (MTP) latency for remote rendering. Decoupling input from rendering can reduce client-side queuing/input lag (always requesting the newest pose), but MTP is still dominated by network RTT/jitter, server render+encode, transfer, and decode+display time. The target is within 100 ms. When users move fast, both translational and rotational, the drift will occur.
+In the related work, please add citations of existing work using QUIC over WebRTC. WebRTC also supports data channels that can be unordered and partially reliable, and WebRTC has built-in congestion control / bandwidth estimation. QUIC’s key transport benefit is that it multiplexes independent streams, so loss on one stream doesn’t necessarily block progress on other streams, but there is still HoL within a stream if packets are lost.
+Review #38C
+===========================================================================
+Overall merit
+-------------
+2. Weak reject
+Reviewer expertise
+------------------
+2. Some familiarity
+Paper summary
+-------------
+The paper proposes TIGAS, a remote rendering framework for interactive 3DGS over HTTP3/QUIC. The paper claims to address two critical challenges in remote rendering: latency and network variability. They do this by using QUIC protocol as well as using a receiver driven ABR. The paper presents the system design, implements it and evaluates it over a public dataset. Code is intended to be made publicly available.
+Comments for authors
+--------------------
+Thanks for submitting to NOSSDAV! More research is needed into how 3DGS can effectively work in practical conditions, especially as adoption of emerging MR/XR/VR apps increases. This paper takes a step in that direction. Another strength of this paper is the intent to release the source code of TIGAS.
+As 3GS is new, I couldn't fully understand the pros and cons of 3GS compared to more known techniques like point-cloud or mesh-based streaming of 3D content. The paper says that 3GS exhibits "faster real-time rendering" but then suddenly also says there are challenges in its adoption due to data-intensive operations, storage overheads, etc. For a reader does not expect in 3GS, this was confusing to read and comprehend.
+I was unclear what are the novel technical contributions of this paper. The paper claims to use QUIC and a receiver-based ABR for delivering content. None of these techniques are new. QUIC has been widely adopted for several years. Most ABR algorithms (including ones used for 3D content) are receiver driven. Even remote rendering is not novel. Maybe, 3DGS + remote rendering + QUIC may not have been explored. However, designing a system that covers all of them, and implementing it seems more of an engineering effort.
+It would be good to provide more details of the 4 network traces used in this paper.
+In Figure 6, why are the (gray lines) bandwidths slightly different in the three plots? Are they estimated bandwidth by different methods?
+Review #38D
+===========================================================================
+Overall merit
+-------------
+2. Weak reject
+Reviewer expertise
+------------------
+3. Knowledgeable
+Paper summary
+-------------
+This paper describes TIGAS, a remote rendering framework for 3DGS scenes. In this framework, the thin-client transmits view parameters (pose and intrinsics) to the GPU-backend, which renders the scene, encodes the rendered frame using JPEG, and streams the resulting 2D image to the client via HTTP/3. The system includes a receiver-driven adaptive bitrate (ABR) controller at the client to manage latency.
+Comments for authors
+--------------------
+While this paper presents a functional system, it is not clear what research problem is being addressed. The “thin-client” approach is well-established in the multimedia systems area for decades. Applying this existing solution to a new media format of 3DGS is a system integration task rather than a research task.
+The proposed ABR controller logic adopts a very straightforward approach, targeting 100ms latency based on throughput estimates.
+Furthermore, the rendering and encoding time appears to be missing from the ABR controller. The ABR formulation in Section 4.3 estimates the completion time only based on the estimated image size and the throughput.
+Given that the primary contribution of this work is the implementation and integration of a thin-client framework for 3DGS rendering, this paper is a better fit for the Open Source & Datasets track or the Demo & Industry track at MMSys.
