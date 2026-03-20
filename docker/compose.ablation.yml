@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  orchestrator:
+    build:
+      context: ..
+      dockerfile: docker/orchestrator.Dockerfile
+    command: ["python", "-c", "print('TODO: run headless ablation orchestrator')"]
+
+  renderer:
+    build:
+      context: ..
+      dockerfile: docker/renderer.Dockerfile
+    command: ["python", "-c", "print('TODO: run renderer service')"]
+
+  predictor:
+    build:
+      context: ..
+      dockerfile: docker/predictor.Dockerfile
+    command: ["python", "-c", "print('TODO: run predictor service')"]
+
+  encoder:
+    build:
+      context: ..
+      dockerfile: docker/encoder.Dockerfile
+    command: ["python", "-c", "print('TODO: run encoder service')"]
+
+  client:
+    build:
+      context: ..
+      dockerfile: docker/client.Dockerfile
+    command: ["sh", "-c", "echo 'TODO: run web client' && sleep infinity"]

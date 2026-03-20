@@ -1,99 +1,108 @@
-# TIGAS low-latency H.264 frame pipeline
+# TIGAS: Modular 3DGS/4DGS Remote Rendering Testbed
 
-This folder now contains a per-frame H.264 transport pipeline for TIGAS remote
-rendering. The old JPEG-only path is still available as a baseline mode.
+This repository is structured as a research-first scaffold for a modular remote rendering pipeline. It is intentionally split into isolated components that communicate through explicit contracts so each module can be implemented, replaced, benchmarked, and ablated independently.
 
-The pipeline is designed for low motion-to-photon latency and supports:
+The architecture follows five core runtime stages:
 
-- Hardware-preferred H.264 encoding (`h264_nvenc` on Linux, `h264_videotoolbox` on macOS)
-- Zero-latency tuning (`zerolatency` where supported)
-- No B-frames (`bframes=0` / `bf=0`)
-- Periodic Intra-Refresh (`intra-refresh=1`) instead of large periodic IDRs
-- Slice-oriented low-latency operation (`sliced-threads=1` where supported)
-- Immediate per-frame emission after encoding
-- NAL-unit packetization for MTU-safe transport over QUIC datagrams/unreliable streams
-- Loss-tolerant client reassembly + decode without ARQ
-- ABR that adjusts encoder bitrate/CRF dynamically
+1. Input and control uplink (interactive and headless)
+2. Intelligence layer (pose prediction and ABR)
+3. Rendering wrapper (3DGS and 4DGS compatible)
+4. Media coding and CMAF packaging
+5. QUIC or MoQ transport and browser client post-processing
 
-## Main files
+Instrumentation, network shaping, and experiment orchestration are first-class components rather than afterthoughts.
 
-- `tigas_video_pipeline.py`
-	- `VideoEncoder`: low-latency H.264 encoder wrapper (PyAV/FFmpeg backend)
-	- `StreamManager`: frame -> NAL units -> QUIC packets
-	- `VideoDecoder`: reassembly buffer and decode path
-	- `LatencyAwareAbrController`: updates bitrate/CRF from timing + network signals
-- `render_websplat_frames.py`
-	- Renders hardcoded 6DoF poses from WebSplat and runs either:
-		- `--mode h264` (default): H.264 packet stream + loopback decode + ABR updates
-		- `--mode jpeg`: legacy JPEG frame dump
-- `smoke_test_video_pipeline.py`
-	- Synthetic-frame test for encode -> packetize -> decode -> ABR loop
+## Repository Layout
 
-## Hardcoded dataset paths
+```text
+TIGAS/
+  docs/                     # Architecture and contract documentation
+  schemas/                  # JSON schemas for traces, datagrams, metrics
+  src/tigas/                # Python module skeletons with interfaces and stubs
+  web/                      # Browser-side placeholders (WebTransport/WebCodecs/WebGPU)
+  docker/                   # Per-module container definitions
+  scripts/                  # Reproducible helper scripts for local runs and ablations
+  tests/                    # Contract and smoke tests for placeholder modules
+  .github/workflows/        # CI ablation matrix scaffold
+```
 
-- PLY: `/home/itec/emanuele/Datasets/3DGS/garden/point_cloud/iteration_30000/point_cloud.ply`
-- Scene: `/home/itec/emanuele/Datasets/3DGS/garden/cameras.json`
+## Current Status
 
-## Setup
+The codebase includes a functional headless baseline path for compressed
+SuperSplat PLY inputs and keeps the rest of the modules contract-first for
+incremental implementation. Current capabilities include:
+
+- Detailed module descriptions
+- Standardized input and output expectations
+- Headless orbit-trace generation for displayless servers
+- CPU rendering backend for `element chunk` + `packed_*` SuperSplat PLY files
+- Headless ablation runner with per-frame metrics and summary export
+
+The goal is to implement components incrementally while preserving a stable high-level architecture.
+
+## Core Contracts
+
+The canonical module contracts are described in:
+
+- `docs/ARCHITECTURE.md`
+- `docs/MODULE_IO_CONTRACTS.md`
+- `docs/DATAFLOW.md`
+- `schemas/*.json`
+
+## Quick Start (Scaffold Validation)
+
+1. Create or activate a Python environment.
+2. Install dependencies:
 
 ```bash
-cd /home/itec/emanuele/TIGAS
-conda activate tigas
 pip install -r requirements.txt
 ```
 
-## Run H.264 per-frame pipeline
+3. Run placeholder contract tests:
 
 ```bash
-cd /home/itec/emanuele/TIGAS
-conda activate tigas
-python render_websplat_frames.py --mode h264 --save-decoded
+pytest -q
 ```
 
-Useful options:
+## Headless Experiment Run
 
-- `--force-software` to disable hardware codec preference
-- `--codec-candidates "h264_nvenc,libx264,h264"` to force codec order
-- `--mtu-bytes 1500` to match path MTU assumptions
-- `--max-encode-width 4096 --max-encode-height 2304` to cap encode size when software H.264 backends have resolution limits
-- `--target-mtp-ms 100` to tune ABR latency budget
-- `--simulate-loss 0.02` to emulate packet drops
+The baseline headless path does not require a display server and is suitable
+for CUDA servers accessed over SSH.
 
-Outputs:
-
-- Packet dumps: `outputs/websplat_h264_packets/frame_XXXX.qpk`
-- Optional decoded loopback frames: `outputs/websplat_h264_decoded/frame_XXXX.jpg`
-
-Notes:
-
-- WebSplat may emit odd frame dimensions. The pipeline automatically crops to
-	the nearest even width/height so `yuv420p` H.264 encoders can initialize.
-
-## Run JPEG baseline
+Run one experiment:
 
 ```bash
-cd /home/itec/emanuele/TIGAS
-conda activate tigas
-python render_websplat_frames.py --mode jpeg
+PYTHONPATH=src python -m tigas.orchestration.run_headless \
+  --ply-path "/path/to/scene.compressed.ply" \
+  --output-dir outputs/headless \
+  --num-frames 120 \
+  --fps 30 \
+  --width 960 \
+  --height 540
 ```
 
-Output directory:
-
-- `outputs/websplat_jpg_frames`
-
-## Run smoke test
+Or use the helper script:
 
 ```bash
-cd /home/itec/emanuele/TIGAS
-conda activate tigas
-python smoke_test_video_pipeline.py
+./scripts/run_headless_ablation.sh "/path/to/scene.compressed.ply"
 ```
 
-## Integration notes for real QUIC transport
+Output artifacts per run:
 
-- `StreamManager.emit_frame(...)` emits packets immediately and can write directly
-	to QUIC datagrams.
-- Packet metadata includes frame/NAL/fragment indices so client reassembly can
-	complete a frame without waiting for segment boundaries.
-- The decoder drops stale incomplete frames, then relies on inter-frame recovery
-	via intra-refresh instead of retransmission.
+1. `frames/frame_*.ppm` rendered frames
+2. `frame_metrics.csv` per-frame render and coverage statistics
+3. `summary.json` aggregate evaluation report
+4. `headless_render.mp4` optional video if `ffmpeg` is available
+
+## Implementation Strategy
+
+Implement one subsystem at a time in this order:
+
+1. Input control contracts and headless trace replay
+2. Pose predictor and ABR baseline policies
+3. Renderer wrapper and LOD registry
+4. Encoder and CMAF packager interfaces
+5. MoQ transport publisher and browser client integration
+6. Metrics buffer integration and kernel-level instrumentation
+
+Each step should preserve contract compatibility and keep all other modules mockable.

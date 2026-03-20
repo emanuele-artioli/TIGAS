@@ -1,0 +1,42 @@
+name: Ablation Matrix
+
+'on':
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  headless-ablation:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        codec: [h264_nvenc, av1_nvenc]
+        predictor: [noop, kalman]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run contract tests
+        run: pytest -q
+
+      - name: Run headless ablation placeholder
+        run: |
+          mkdir -p artifacts
+          echo "codec=${{ matrix.codec }} predictor=${{ matrix.predictor }}" > artifacts/run_manifest.txt
+          echo "TODO: execute headless ablation pipeline and export parquet metrics" > artifacts/summary.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ablation-${{ matrix.codec }}-${{ matrix.predictor }}
+          path: artifacts

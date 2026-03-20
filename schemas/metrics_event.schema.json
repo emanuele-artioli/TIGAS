@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tigas.local/schemas/metrics_event.schema.json",
+  "title": "TIGAS Metrics Event",
+  "description": "Normalized metrics row emitted by any module to the zero-interference metrics buffer.",
+  "type": "object",
+  "required": ["component", "event_type", "timestamp_ns"],
+  "properties": {
+    "component": {
+      "type": "string"
+    },
+    "event_type": {
+      "type": "string"
+    },
+    "timestamp_ns": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "seq_id": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "duration_us": {
+      "type": "number",
+      "minimum": 0
+    },
+    "value": {
+      "type": "number"
+    },
+    "tags": {
+      "type": "object",
+      "additionalProperties": {
+        "type": ["string", "number", "boolean"]
+      }
+    }
+  },
+  "additionalProperties": false
+}

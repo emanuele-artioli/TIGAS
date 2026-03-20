@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tigas.local/schemas/uplink_datagram.schema.json",
+  "title": "TIGAS Uplink Datagram",
+  "description": "Single control datagram payload for unreliable QUIC transport.",
+  "type": "object",
+  "required": [
+    "seq_id",
+    "timestamp_ms",
+    "camera_matrix_4x4",
+    "requested_lod",
+    "target_bitrate_kbps"
+  ],
+  "properties": {
+    "seq_id": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "timestamp_ms": {
+      "type": "number",
+      "minimum": 0
+    },
+    "camera_matrix_4x4": {
+      "type": "array",
+      "minItems": 16,
+      "maxItems": 16,
+      "items": {
+        "type": "number"
+      }
+    },
+    "requested_lod": {
+      "type": "string"
+    },
+    "target_bitrate_kbps": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "additionalProperties": false
+}

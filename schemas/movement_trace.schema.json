@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tigas.local/schemas/movement_trace.schema.json",
+  "title": "TIGAS Movement Trace",
+  "description": "Deterministic camera trajectory for headless replay. Timestamps are relative to trace start in milliseconds.",
+  "type": "object",
+  "required": ["trace_id", "fps", "samples"],
+  "properties": {
+    "trace_id": {
+      "type": "string"
+    },
+    "fps": {
+      "type": "number",
+      "minimum": 1
+    },
+    "samples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["timestamp_ms", "camera_matrix_4x4"],
+        "properties": {
+          "timestamp_ms": {
+            "type": "number",
+            "minimum": 0
+          },
+          "camera_matrix_4x4": {
+            "type": "array",
+            "minItems": 16,
+            "maxItems": 16,
+            "items": {
+              "type": "number"
+            }
+          },
+          "requested_lod": {
+            "type": "string"
+          },
+          "target_bitrate_kbps": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "metadata": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}
