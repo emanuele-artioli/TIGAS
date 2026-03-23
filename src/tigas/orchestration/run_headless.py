@@ -24,6 +24,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--height", type=int, default=540, help="Output frame height")
     parser.add_argument("--max-points", type=int, default=120000, help="Point budget for rendering")
     parser.add_argument(
+        "--quant-bits",
+        type=int,
+        default=8,
+        help="Bit-depth used for quantized LOD rendering",
+    )
+    parser.add_argument(
+        "--renderer-backend",
+        default="cpu",
+        choices=["cpu", "gsplat_cuda"],
+        help="Renderer backend implementation",
+    )
+    parser.add_argument(
         "--default-lod",
         default="full",
         choices=["full", "sampled_50", "quant_8bit", "adaptive"],
@@ -59,6 +71,8 @@ def main() -> None:
         width=args.width,
         height=args.height,
         max_points=args.max_points,
+        renderer_backend=args.renderer_backend,
+        quant_bits=args.quant_bits,
     )
     summary = HeadlessAblationRunner().run_one(config)
     print(json.dumps(summary, indent=2))

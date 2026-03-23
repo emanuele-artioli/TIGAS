@@ -28,14 +28,18 @@ TIGAS/
 
 ## Current Status
 
-The codebase includes a functional headless baseline path for compressed
-SuperSplat PLY inputs and keeps the rest of the modules contract-first for
+The codebase includes a functional headless baseline path for both standard
+3DGS and compressed SuperSplat PLY inputs and keeps the rest of the modules
+contract-first for
 incremental implementation. Current capabilities include:
 
 - Detailed module descriptions
 - Standardized input and output expectations
 - Headless orbit-trace generation for displayless servers
-- CPU rendering backend for `element chunk` + `packed_*` SuperSplat PLY files
+- CPU rendering backend for standard 3DGS (`f_dc_*`, `opacity`, `scale_*`) and
+  compressed SuperSplat (`element chunk`, `packed_*`) files
+- Splat-style CPU blend pass (color + opacity + scale-driven smoothing) to avoid
+  point-only dot rendering
 - Headless ablation runner with per-frame metrics and summary export
 
 The goal is to implement components incrementally while preserving a stable high-level architecture.
@@ -74,12 +78,22 @@ Run one experiment:
 ```bash
 PYTHONPATH=src python -m tigas.orchestration.run_headless \
   --ply-path "/path/to/scene.compressed.ply" \
+  --renderer-backend cpu \
+  --quant-bits 8 \
   --output-dir outputs/headless \
   --num-frames 120 \
   --fps 30 \
   --width 960 \
   --height 540
 ```
+
+Use `--renderer-backend gsplat_cuda` to run the CUDA path with gsplat.
+For `gsplat_cuda`, install `torch`, `gsplat`, and a compatible CUDA toolkit in
+the active environment.
+
+The `quant_8bit` LOD keeps the same splat count and applies attribute
+quantization (position, color, scale, opacity). Use `--quant-bits` to control
+the quantization strength (lower bits = stronger degradation).
 
 Or use the helper script:
 

@@ -13,6 +13,7 @@ from typing import Dict, Literal, Optional
 LodId = Literal["full", "sampled_50", "quant_8bit", "adaptive"]
 CodecId = Literal["h264_nvenc", "av1_nvenc", "libx264", "videotoolbox_h264"]
 ObjectPriority = Literal["high", "normal"]
+RendererBackendId = Literal["cpu", "gsplat_cuda"]
 
 
 @dataclass(slots=True)
@@ -106,3 +107,5 @@ class ExperimentConfig:
     width: int = 960
     height: int = 540
     max_points: int = 120000
+    renderer_backend: RendererBackendId = "cpu"
+    quant_bits: int = 8

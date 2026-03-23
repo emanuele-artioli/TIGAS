@@ -94,6 +94,8 @@ def test_load_supersplat_compressed_ply(tmp_path) -> None:
     cloud = load_supersplat_compressed_ply(str(ply_path))
     assert cloud.point_count == 2
     assert cloud.xyz.shape == (2, 3)
+    assert cloud.scale_xyz.shape == (2, 3)
     assert cloud.rgb.shape == (2, 3)
+    assert cloud.encoding == "supersplat_compressed"
     assert cloud.xyz[0, 0] == -1.0
     assert cloud.xyz[1, 2] == 3.0

@@ -20,6 +20,7 @@ import numpy as np
 
 from tigas.input_control.headless_replayer import HeadlessTraceReplayer
 from tigas.renderer.backend_cpu import CpuFallbackBackend
+from tigas.renderer.backend_gsplat import GsplatCudaBackend
 from tigas.shared.types import ExperimentConfig, RenderRequest
 
 
@@ -33,6 +34,24 @@ def _write_ppm(path: Path, frame_rgb: np.ndarray) -> None:
 
 class HeadlessAblationRunner:
     """Runner for scripted headless ablation experiments."""
+
+    def _build_renderer(self, config: ExperimentConfig, point_cloud_path: Path):
+        if config.renderer_backend == "gsplat_cuda":
+            return GsplatCudaBackend(
+                point_cloud_path=str(point_cloud_path),
+                width=config.width,
+                height=config.height,
+                max_points=config.max_points,
+                quant_bits=config.quant_bits,
+            )
+
+        return CpuFallbackBackend(
+            point_cloud_path=str(point_cloud_path),
+            width=config.width,
+            height=config.height,
+            max_points=config.max_points,
+            quant_bits=config.quant_bits,
+        )
 
     def _resolve_point_cloud_path(self, config: ExperimentConfig) -> Path:
         if config.asset_path:
@@ -88,15 +107,11 @@ class HeadlessAblationRunner:
         frames_dir = output_dir / "frames"
         frames_dir.mkdir(parents=True, exist_ok=True)
 
-        renderer = CpuFallbackBackend(
-            point_cloud_path=str(point_cloud_path),
-            width=config.width,
-            height=config.height,
-            max_points=config.max_points,
-        )
+        renderer = self._build_renderer(config=config, point_cloud_path=point_cloud_path)
         renderer.initialize()
         point_count = renderer.loaded_point_count
         scene_radius = renderer.scene_radius
+        backend_name = renderer.backend_name
 
         replayer = HeadlessTraceReplayer()
         trace_json = Path(config.trace_path) if config.trace_path else None
@@ -183,6 +198,7 @@ class HeadlessAblationRunner:
             "frame_metrics_csv": str(metrics_csv),
             "frames_rendered": frames_rendered,
             "resolution": {"width": config.width, "height": config.height},
+            "renderer_backend": backend_name,
             "point_count": point_count,
             "scene_radius": scene_radius,
             "render_time_ms": {
