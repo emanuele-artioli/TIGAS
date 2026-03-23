@@ -16,6 +16,12 @@ Semantics:
 
 - Must fit in one unreliable QUIC datagram payload.
 - Latest datagram supersedes earlier stale datagrams.
+- In headless mode, `target_bitrate_kbps` can be sourced from standardized network traces (`network_traces/*.csv`).
+
+Headless standardized sources:
+
+- Movement traces: `movement_traces/*.json`
+- Network traces: `network_traces/*.csv`
 
 ## 2. Pose Predictor Contract
 
@@ -104,3 +110,22 @@ Consumer responsibilities:
 
 - Batch drain without blocking producers
 - Flush to parquet with schema version tag
+
+## 8. Evaluation Contract (Offline Only)
+
+Input:
+
+- Runtime render callback stream (frame bytes + metadata)
+- Reference run output for quality comparison
+- Sweep parameters (sparsity, resolution, quantization)
+
+Output:
+
+- Per-run frame dumps
+- Per-run frame metrics (`coverage`, `brightness`, `ssim_vs_full`)
+- Per-run summary and encoded video
+- Global tradeoff curve artifacts (`csv`, `markdown`)
+
+Boundary rule:
+
+- Evaluation logic must remain outside runtime-critical serving paths.

@@ -101,6 +101,7 @@ class ExperimentConfig:
     network_profile: str
     default_lod: LodId
     asset_path: Optional[str] = None
+    network_trace_path: Optional[str] = None
     output_dir: str = "outputs/headless"
     num_frames: int = 120
     fps: int = 30

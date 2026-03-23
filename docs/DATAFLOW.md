@@ -18,10 +18,17 @@ This document describes the intended end-to-end dataflow for both interactive an
 ## Headless Ablation Sequence
 
 1. Trace replayer loads JSON movement timeline.
-2. Replay clock emits deterministic pose datagrams.
-3. Remaining pipeline follows the interactive server path.
-4. Metrics drain writes parquet output per experiment configuration.
-5. Report stage compares latency, quality proxy, and throughput.
+2. Optional network trace loader applies deterministic bitrate targets.
+3. Replay clock emits deterministic pose datagrams.
+4. Runtime runner executes rendering path (no evaluation file generation).
+
+## Offline Evaluation Sequence
+
+1. Evaluation runner invokes runtime headless loop through a callback boundary.
+2. Evaluation layer persists frames and per-frame metrics.
+3. Evaluation layer computes quality proxy (SSIM versus full-reference run).
+4. Evaluation layer encodes video outputs and writes tradeoff reports.
+5. Curve stage compares latency, quality proxy, and throughput across sweeps.
 
 ## Timing and Clocking
 

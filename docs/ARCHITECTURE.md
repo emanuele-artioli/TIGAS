@@ -58,18 +58,18 @@ This document defines the high-level architecture for the TIGAS remote rendering
 
 ### 8. Orchestration and Experiments
 
-- Pipeline orchestrator wires modules by configuration.
-- Headless ablation runner executes matrix combinations.
-- CI workflow runs reduced matrix and uploads metrics artifacts.
+- Runtime runner wires renderer execution and control replay for low-overhead headless operation.
+- Evaluation module executes matrix combinations (sparsity, resolution, quantization) offline.
+- CI workflow should run reduced runtime checks and separate evaluation sweeps as artifacts.
 
 ## Execution Modes
 
 1. Interactive live mode: Browser controls camera in real time.
 2. Headless replay mode: Trace file drives deterministic experiments.
-3. Offline analysis mode: Aggregate parquet metrics for report generation.
+3. Offline evaluation mode: Frame export, SSIM proxy, tradeoff curves, and video encoding.
 
 ## Implementation Notes
 
-- Placeholder code in `src/tigas` is intentionally non-functional and raises explicit errors.
+- Runtime and evaluation responsibilities should remain decoupled: evaluation work must not be on latency-critical runtime paths.
 - Subsystems should be implemented without changing contract shapes unless contracts are versioned.
-- Add unit tests per module before integrating into the orchestration layer.
+- Add unit tests per module before integrating into shared orchestration paths.

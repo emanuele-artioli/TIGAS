@@ -40,7 +40,17 @@ def _parse_resolutions(raw: str) -> list[tuple[int, int]]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run offline TIGAS evaluation sweeps")
     parser.add_argument("--ply-path", required=True, help="Path to .ply point cloud")
-    parser.add_argument("--trace-json", default="", help="Optional movement trace JSON path")
+    parser.add_argument(
+        "--movement-trace",
+        default="",
+        help="Movement trace path or trace name in movement_traces (e.g. Circular)",
+    )
+    parser.add_argument("--trace-json", default="", help="Deprecated alias for --movement-trace")
+    parser.add_argument(
+        "--network-trace",
+        default="",
+        help="Network trace CSV path or name in network_traces (e.g. lte_steps)",
+    )
     parser.add_argument("--output-dir", default="outputs/evaluation", help="Evaluation output root")
     parser.add_argument("--num-frames", type=int, default=120, help="Frames per run")
     parser.add_argument("--fps", type=int, default=30, help="Frame rate for rendering and video")
@@ -71,17 +81,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    movement_trace = args.movement_trace if args.movement_trace else args.trace_json
     sparsity_levels = _parse_sparsity_levels(args.sparsity_levels)
     resolutions = _parse_resolutions(args.resolutions)
     quant_bits_list = _parse_quant_bits(args.quant_bits_list)
 
     base_config = ExperimentConfig(
-        trace_path=args.trace_json,
+        trace_path=movement_trace,
         codec="libx264",
         predictor="noop",
         network_profile="wifi",
         default_lod="full",
         asset_path=args.ply_path,
+        network_trace_path=args.network_trace,
         output_dir=args.output_dir,
         num_frames=args.num_frames,
         fps=args.fps,

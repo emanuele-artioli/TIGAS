@@ -4,18 +4,19 @@ set -euo pipefail
 # Offline evaluation sweep launcher.
 #
 # Usage:
-# ./scripts/run_evaluation_sweep.sh <PLY_PATH> [TRACE_JSON] [OUTPUT_DIR]
+# ./scripts/run_evaluation_sweep.sh <PLY_PATH> [MOVEMENT_TRACE] [NETWORK_TRACE] [OUTPUT_DIR]
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 PLY_PATH="${1:-}"
-TRACE_JSON="${2:-}"
-OUTPUT_DIR="${3:-${REPO_ROOT}/outputs/evaluation}"
+MOVEMENT_TRACE="${2:-}"
+NETWORK_TRACE="${3:-}"
+OUTPUT_DIR="${4:-${REPO_ROOT}/outputs/evaluation}"
 
 if [[ -z "${PLY_PATH}" ]]; then
 	echo "error: missing PLY path"
-	echo "usage: ./scripts/run_evaluation_sweep.sh <PLY_PATH> [TRACE_JSON] [OUTPUT_DIR]"
+	echo "usage: ./scripts/run_evaluation_sweep.sh <PLY_PATH> [MOVEMENT_TRACE] [NETWORK_TRACE] [OUTPUT_DIR]"
 	exit 1
 fi
 
@@ -34,8 +35,12 @@ CMD=(
 	--quant-bits-list "8,6,4,3"
 )
 
-if [[ -n "${TRACE_JSON}" ]]; then
-	CMD+=(--trace-json "${TRACE_JSON}")
+if [[ -n "${MOVEMENT_TRACE}" ]]; then
+	CMD+=(--movement-trace "${MOVEMENT_TRACE}")
+fi
+
+if [[ -n "${NETWORK_TRACE}" ]]; then
+	CMD+=(--network-trace "${NETWORK_TRACE}")
 fi
 
 "${CMD[@]}"

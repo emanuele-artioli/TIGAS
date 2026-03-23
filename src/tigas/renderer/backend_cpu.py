@@ -223,8 +223,14 @@ class CpuFallbackBackend(RendererBackend):
         projected_x = (camera_space[:, 0] / np.maximum(depth, 1e-6)) * self._focal_x + (self.width * 0.5)
         projected_y = (self.height * 0.5) - (camera_space[:, 1] / np.maximum(depth, 1e-6)) * self._focal_y
 
-        px = projected_x.astype(np.int32)
-        py = projected_y.astype(np.int32)
+        int32_min = np.iinfo(np.int32).min
+        int32_max = np.iinfo(np.int32).max
+        px = np.full(projected_x.shape, -1, dtype=np.int32)
+        py = np.full(projected_y.shape, -1, dtype=np.int32)
+        valid_x = np.isfinite(projected_x) & (projected_x >= int32_min) & (projected_x <= int32_max)
+        valid_y = np.isfinite(projected_y) & (projected_y >= int32_min) & (projected_y <= int32_max)
+        px[valid_x] = projected_x[valid_x].astype(np.int32)
+        py[valid_y] = projected_y[valid_y].astype(np.int32)
 
         valid &= px >= 0
         valid &= px < self.width

@@ -18,7 +18,6 @@ Develop a research-grade remote rendering system for 3D Gaussian Splatting (3DGS
 
 * **Interactive Mode**: Browser (JS) captures 6-DOF camera poses.  
 * **Headless Mode**: Trace-replayer reads standardized .json movement traces.  
-* **Standardized Assets**: Repository-tracked movement traces and network traces must be selectable by name for reproducible headless scenarios.  
 * **Piggybacking**: Every uplink datagram must contain: \[Seq\_ID | Timestamp | 4x4\_Matrix | Requested\_LOD | Target\_Bitrate\].  
 * **Protocol**: Unreliable QUIC Datagrams.
 

@@ -6,6 +6,7 @@ ablation experiments deterministic and reproducible.
 
 from __future__ import annotations
 
+import csv
 import json
 import math
 from dataclasses import dataclass
@@ -87,6 +88,9 @@ class HeadlessTraceReplayer:
         with open(trace_path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
 
+        if isinstance(data, list):
+            return self._load_position_trace(data)
+
         samples: list[TraceSample] = []
         for item in data.get("samples", []):
             samples.append(
@@ -98,6 +102,80 @@ class HeadlessTraceReplayer:
                 )
             )
         return samples
+
+    def _load_position_trace(self, rows: list[dict]) -> list[TraceSample]:
+        """Parse movement traces with x/y/z/tMs structure into camera matrices."""
+        if not rows:
+            return []
+
+        points = [
+            (
+                float(item.get("x", 0.0)),
+                float(item.get("y", 0.0)),
+                float(item.get("z", 0.0)),
+            )
+            for item in rows
+        ]
+        center = (
+            sum(p[0] for p in points) / len(points),
+            sum(p[1] for p in points) / len(points),
+            sum(p[2] for p in points) / len(points),
+        )
+
+        samples: list[TraceSample] = []
+        for idx, item in enumerate(rows):
+            eye = points[idx]
+            matrix = self._look_at_camera_to_world(eye=eye, target=center)
+            timestamp = float(item.get("tMs", idx * 33.333))
+            samples.append(
+                TraceSample(
+                    timestamp_ms=timestamp,
+                    camera_matrix_4x4=matrix,
+                    requested_lod=str(item.get("requested_lod", "full")),
+                    target_bitrate_kbps=int(item.get("target_bitrate_kbps", 4000)),
+                )
+            )
+        return samples
+
+    def load_network_trace(self, trace_path: str) -> list[int]:
+        """Load a network trace CSV (or newline-separated values) as kbps samples."""
+        bandwidth_kbps: list[int] = []
+        with open(trace_path, "r", encoding="utf-8") as handle:
+            reader = csv.reader(handle)
+            for row in reader:
+                if not row:
+                    continue
+                token = row[0].strip()
+                if not token:
+                    continue
+                try:
+                    value = int(round(float(token)))
+                except ValueError:
+                    continue
+                bandwidth_kbps.append(max(1, value))
+        return bandwidth_kbps
+
+    def apply_network_trace(
+        self,
+        samples: list[TraceSample],
+        bandwidth_kbps: list[int],
+    ) -> list[TraceSample]:
+        """Apply network trace values to per-sample target bitrate."""
+        if not samples or not bandwidth_kbps:
+            return samples
+
+        applied: list[TraceSample] = []
+        for idx, sample in enumerate(samples):
+            bitrate = bandwidth_kbps[idx % len(bandwidth_kbps)]
+            applied.append(
+                TraceSample(
+                    timestamp_ms=sample.timestamp_ms,
+                    camera_matrix_4x4=sample.camera_matrix_4x4,
+                    requested_lod=sample.requested_lod,
+                    target_bitrate_kbps=int(bitrate),
+                )
+            )
+        return applied
 
     def build_datagrams(self, samples: list[TraceSample]) -> list[UplinkDatagram]:
         """Convert trace samples into canonical uplink datagrams."""

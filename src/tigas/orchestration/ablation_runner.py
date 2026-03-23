@@ -57,10 +57,29 @@ class HeadlessAblationRunner:
             "Could not resolve a point-cloud path. Set `asset_path` to a valid .ply file."
         )
 
+    @staticmethod
+    def _resolve_trace_input(trace_arg: str | None, folder: str, suffix: str) -> Path | None:
+        if not trace_arg:
+            return None
+
+        candidate = Path(trace_arg)
+        if candidate.exists():
+            return candidate
+
+        project_root = Path(__file__).resolve().parents[3]
+        folder_path = project_root / folder
+        by_name = folder_path / f"{trace_arg}{suffix}"
+        if by_name.exists():
+            return by_name
+
+        raise FileNotFoundError(
+            f"Could not resolve trace '{trace_arg}'. Checked path and {folder_path}/{trace_arg}{suffix}."
+        )
+
     def _build_datagrams(self, config: ExperimentConfig, renderer) -> tuple[list[UplinkDatagram], str]:
         replayer = HeadlessTraceReplayer()
-        trace_json = Path(config.trace_path) if config.trace_path else None
-        if trace_json and trace_json.exists() and trace_json.suffix.lower() == ".json":
+        trace_json = self._resolve_trace_input(config.trace_path, "movement_traces", ".json")
+        if trace_json and trace_json.suffix.lower() == ".json":
             samples = replayer.load_trace(str(trace_json))
             trace_source = str(trace_json)
         else:
@@ -73,6 +92,16 @@ class HeadlessAblationRunner:
                 requested_lod=config.default_lod,
             )
             trace_source = "generated_orbit"
+
+        network_trace = self._resolve_trace_input(
+            config.network_trace_path,
+            "network_traces",
+            ".csv",
+        )
+        if network_trace is not None:
+            bandwidth_kbps = replayer.load_network_trace(str(network_trace))
+            samples = replayer.apply_network_trace(samples=samples, bandwidth_kbps=bandwidth_kbps)
+            trace_source = f"{trace_source};network={network_trace}"
 
         datagrams = replayer.build_datagrams(samples)
         if config.num_frames > 0 and len(datagrams) > config.num_frames:
@@ -131,6 +160,10 @@ class HeadlessAblationRunner:
             "status": "ok",
             "point_cloud_path": str(point_cloud_path),
             "trace_source": trace_source,
+            "network_trace_path": config.network_trace_path,
+            "target_bitrate_kbps_mean": float(
+                np.mean([d.target_bitrate_kbps for d in datagrams])
+            ),
             "frames_rendered": frames_rendered,
             "resolution": {"width": config.width, "height": config.height},
             "renderer_backend": backend_name,

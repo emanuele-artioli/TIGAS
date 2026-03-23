@@ -2,13 +2,14 @@
 
 This repository is structured as a research-first scaffold for a modular remote rendering pipeline. It is intentionally split into isolated components that communicate through explicit contracts so each module can be implemented, replaced, benchmarked, and ablated independently.
 
-The architecture follows five core runtime stages:
+The architecture follows six core runtime stages:
 
 1. Input and control uplink (interactive and headless)
 2. Intelligence layer (pose prediction and ABR)
 3. Rendering wrapper (3DGS and 4DGS compatible)
 4. Media coding and CMAF packaging
 5. QUIC or MoQ transport and browser client post-processing
+6. Optional offline evaluation (decoupled from runtime hot paths)
 
 Instrumentation, network shaping, and experiment orchestration are first-class components rather than afterthoughts.
 
@@ -30,8 +31,7 @@ TIGAS/
 
 The codebase includes a functional headless baseline path for both standard
 3DGS and compressed SuperSplat PLY inputs and keeps the rest of the modules
-contract-first for
-incremental implementation. Current capabilities include:
+contract-first for incremental implementation. Current capabilities include:
 
 - Detailed module descriptions
 - Standardized input and output expectations
@@ -40,7 +40,10 @@ incremental implementation. Current capabilities include:
   compressed SuperSplat (`element chunk`, `packed_*`) files
 - Splat-style CPU blend pass (color + opacity + scale-driven smoothing) to avoid
   point-only dot rendering
-- Headless ablation runner with per-frame metrics and summary export
+- Runtime-only headless render loop (timing-focused, no evaluation overhead)
+- Offline evaluation component for sweeps (sparsity, resolution, quant bits)
+- SSIM proxy against full-reference runs
+- Evaluation-side video encoding and tradeoff-curve reporting
 
 The goal is to implement components incrementally while preserving a stable high-level architecture.
 
@@ -90,6 +93,21 @@ Use `--renderer-backend gsplat_cuda` to run the CUDA path with gsplat.
 For `gsplat_cuda`, install `torch`, `gsplat`, and a compatible CUDA toolkit in
 the active environment.
 
+Standardized trace selection is supported directly in headless mode:
+
+- Movement traces: pass `--movement-trace` as a file path or trace name from `movement_traces/` (for example `Circular`, `Linear`, `Random`).
+- Network traces: pass `--network-trace` as a file path or trace name from `network_traces/` (for example `lte`, `lte_steps`, `lte_cascading`).
+
+Example:
+
+```bash
+PYTHONPATH=src python -m tigas.orchestration.run_headless \
+  --ply-path "/path/to/scene.ply" \
+  --movement-trace Circular \
+  --network-trace lte_steps \
+  --renderer-backend gsplat_cuda
+```
+
 The `quant_8bit` LOD keeps the same splat count and applies attribute
 quantization (position, color, scale, opacity). Use `--quant-bits` to control
 the quantization strength (lower bits = stronger degradation).
@@ -99,6 +117,9 @@ Or use the helper script:
 ```bash
 ./scripts/run_headless_ablation.sh "/path/to/scene.compressed.ply"
 ```
+
+This command prints runtime timing summaries and does not generate evaluation
+artifacts by design.
 
 ## Evaluation Component (Offline)
 
@@ -111,6 +132,8 @@ Run a sparsity/resolution/quantization sweep:
 ```bash
 PYTHONPATH=src python -m tigas.evaluation.run_evaluation \
   --ply-path "/path/to/scene.ply" \
+  --movement-trace Circular \
+  --network-trace lte_steps \
   --renderer-backend gsplat_cuda \
   --output-dir outputs/evaluation \
   --num-frames 120 \
@@ -121,6 +144,12 @@ PYTHONPATH=src python -m tigas.evaluation.run_evaluation \
   --quant-bits-list "8,6,4,3"
 ```
 
+Or use the helper script:
+
+```bash
+./scripts/run_evaluation_sweep.sh "/path/to/scene.ply"
+```
+
 Evaluation outputs:
 
 1. per-run `frames/frame_*.ppm`
@@ -128,13 +157,6 @@ Evaluation outputs:
 3. per-run `summary.json`
 4. per-run `headless_render.mp4` (evaluation requires `ffmpeg`)
 5. global `tradeoff_curve.csv` and `tradeoff_curve.md`
-
-Output artifacts per run:
-
-1. `frames/frame_*.ppm` rendered frames
-2. `frame_metrics.csv` per-frame render and coverage statistics
-3. `summary.json` aggregate evaluation report
-4. `headless_render.mp4` optional video if `ffmpeg` is available
 
 ## Implementation Strategy
 

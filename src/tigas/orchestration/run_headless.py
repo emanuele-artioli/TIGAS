@@ -13,9 +13,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a runtime-only headless TIGAS render")
     parser.add_argument("--ply-path", required=True, help="Path to .ply point cloud")
     parser.add_argument(
-        "--trace-json",
+        "--movement-trace",
         default="",
-        help="Optional movement trace JSON. If omitted, an orbit trace is generated.",
+        help="Movement trace path or trace name in movement_traces (e.g. Circular)",
+    )
+    parser.add_argument(
+        "--network-trace",
+        default="",
+        help="Network trace CSV path or name in network_traces (e.g. lte_steps)",
     )
     parser.add_argument("--output-dir", default="outputs/headless", help="Reserved for compatibility")
     parser.add_argument("--num-frames", type=int, default=120, help="Number of frames to render")
@@ -59,12 +64,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
     config = ExperimentConfig(
-        trace_path=args.trace_json,
+        trace_path=args.movement_trace,
         codec=args.codec,
         predictor=args.predictor,
         network_profile=args.network_profile,
         default_lod=args.default_lod,
         asset_path=args.ply_path,
+        network_trace_path=args.network_trace,
         output_dir=args.output_dir,
         num_frames=args.num_frames,
         fps=args.fps,
