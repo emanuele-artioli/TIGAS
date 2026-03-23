@@ -97,6 +97,7 @@ Standardized trace selection is supported directly in headless mode:
 
 - Movement traces: pass `--movement-trace` as a file path or trace name from `movement_traces/` (for example `Circular`, `Linear`, `Random`).
 - Network traces: pass `--network-trace` as a file path or trace name from `network_traces/` (for example `lte`, `lte_steps`, `lte_cascading`).
+- ABR profiles: pass `--abr-profile` as a file path or profile name from `abr_profiles/` (for example `throughput`, `bola`, `robustmpc`).
 
 Example:
 
@@ -105,8 +106,35 @@ PYTHONPATH=src python -m tigas.orchestration.run_headless \
   --ply-path "/path/to/scene.ply" \
   --movement-trace Circular \
   --network-trace lte_steps \
+  --abr-profile throughput \
   --renderer-backend gsplat_cuda
 ```
+
+ABR profiles are JSON files so algorithms are versioned and reproducible like
+movement/network traces. Each profile declares algorithm family and bitrate/LOD
+mapping:
+
+1. `abr_profiles/throughput.json`
+2. `abr_profiles/bola.json`
+3. `abr_profiles/robustmpc.json`
+
+The runtime loop measures delivered payload throughput from frame bytes and
+frame intervals, then applies ABR decisions. When `--network-trace` is used,
+network-trace bitrate is treated as a cap (ABR cannot request above it).
+
+Optional Linux `tc` shaping can be enabled in headless runs:
+
+```bash
+PYTHONPATH=src python -m tigas.orchestration.run_headless \
+  --ply-path "/path/to/scene.ply" \
+  --movement-trace Circular \
+  --network-trace lte_steps \
+  --abr-profile bola \
+  --enable-tc \
+  --tc-interface eth0
+```
+
+`tc` application is best-effort and may fail without sufficient host privileges.
 
 The `quant_8bit` LOD keeps the same splat count and applies attribute
 quantization (position, color, scale, opacity). Use `--quant-bits` to control
@@ -116,6 +144,12 @@ Or use the helper script:
 
 ```bash
 ./scripts/run_headless_ablation.sh "/path/to/scene.compressed.ply"
+```
+
+Helper script with ABR and tc options:
+
+```bash
+./scripts/run_headless_ablation.sh "/path/to/scene.compressed.ply" Circular lte_steps gsplat_cuda 8 robustmpc eth0
 ```
 
 This command prints runtime timing summaries and does not generate evaluation
@@ -134,6 +168,7 @@ PYTHONPATH=src python -m tigas.evaluation.run_evaluation \
   --ply-path "/path/to/scene.ply" \
   --movement-trace Circular \
   --network-trace lte_steps \
+  --abr-profile throughput \
   --renderer-backend gsplat_cuda \
   --output-dir outputs/evaluation \
   --num-frames 120 \
@@ -148,6 +183,12 @@ Or use the helper script:
 
 ```bash
 ./scripts/run_evaluation_sweep.sh "/path/to/scene.ply"
+```
+
+Compare ABR algorithms across the same traces:
+
+```bash
+bash ./scripts/run_abr_comparison.sh "/path/to/scene.ply" Circular lte_steps outputs/abr_comparison
 ```
 
 Evaluation outputs:

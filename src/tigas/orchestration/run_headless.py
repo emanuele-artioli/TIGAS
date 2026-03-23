@@ -22,6 +22,21 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Network trace CSV path or name in network_traces (e.g. lte_steps)",
     )
+    parser.add_argument(
+        "--abr-profile",
+        default="",
+        help="ABR profile JSON path or profile name in abr_profiles (throughput, bola, robustmpc)",
+    )
+    parser.add_argument(
+        "--enable-tc",
+        action="store_true",
+        help="Enable best-effort Linux tc shaping using network trace target rates",
+    )
+    parser.add_argument(
+        "--tc-interface",
+        default="",
+        help="Network interface to shape when --enable-tc is set (for example eth0 or lo)",
+    )
     parser.add_argument("--output-dir", default="outputs/headless", help="Reserved for compatibility")
     parser.add_argument("--num-frames", type=int, default=120, help="Number of frames to render")
     parser.add_argument("--fps", type=int, default=30, help="Frame rate used for timestamps")
@@ -71,6 +86,9 @@ def main() -> None:
         default_lod=args.default_lod,
         asset_path=args.ply_path,
         network_trace_path=args.network_trace,
+        abr_profile_path=args.abr_profile,
+        enable_tc=bool(args.enable_tc),
+        tc_interface=args.tc_interface,
         output_dir=args.output_dir,
         num_frames=args.num_frames,
         fps=args.fps,

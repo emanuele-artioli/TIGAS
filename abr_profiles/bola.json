@@ -1,0 +1,11 @@
+{
+  "name": "bola",
+  "algorithm": "bola",
+  "bitrates_kbps": [800, 1500, 2500, 4000, 6000],
+  "lods": ["quant_8bit", "sampled_50", "sampled_50", "full", "full"],
+  "bola_v": 5.0,
+  "bola_gamma": 5.0,
+  "ewma_alpha": 0.3,
+  "min_bitrate_kbps": 500,
+  "max_bitrate_kbps": 7000
+}

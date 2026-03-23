@@ -51,6 +51,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Network trace CSV path or name in network_traces (e.g. lte_steps)",
     )
+    parser.add_argument(
+        "--abr-profile",
+        default="",
+        help="ABR profile JSON path or profile name in abr_profiles",
+    )
     parser.add_argument("--output-dir", default="outputs/evaluation", help="Evaluation output root")
     parser.add_argument("--num-frames", type=int, default=120, help="Frames per run")
     parser.add_argument("--fps", type=int, default=30, help="Frame rate for rendering and video")
@@ -94,6 +99,7 @@ def main() -> None:
         default_lod="full",
         asset_path=args.ply_path,
         network_trace_path=args.network_trace,
+        abr_profile_path=args.abr_profile,
         output_dir=args.output_dir,
         num_frames=args.num_frames,
         fps=args.fps,

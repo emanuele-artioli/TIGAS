@@ -4,7 +4,7 @@ set -euo pipefail
 # Offline evaluation sweep launcher.
 #
 # Usage:
-# ./scripts/run_evaluation_sweep.sh <PLY_PATH> [MOVEMENT_TRACE] [NETWORK_TRACE] [OUTPUT_DIR]
+# ./scripts/run_evaluation_sweep.sh <PLY_PATH> [MOVEMENT_TRACE] [NETWORK_TRACE] [OUTPUT_DIR] [ABR_PROFILE]
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -13,10 +13,11 @@ PLY_PATH="${1:-}"
 MOVEMENT_TRACE="${2:-}"
 NETWORK_TRACE="${3:-}"
 OUTPUT_DIR="${4:-${REPO_ROOT}/outputs/evaluation}"
+ABR_PROFILE="${5:-}"
 
 if [[ -z "${PLY_PATH}" ]]; then
 	echo "error: missing PLY path"
-	echo "usage: ./scripts/run_evaluation_sweep.sh <PLY_PATH> [MOVEMENT_TRACE] [NETWORK_TRACE] [OUTPUT_DIR]"
+	echo "usage: ./scripts/run_evaluation_sweep.sh <PLY_PATH> [MOVEMENT_TRACE] [NETWORK_TRACE] [OUTPUT_DIR] [ABR_PROFILE]"
 	exit 1
 fi
 
@@ -41,6 +42,10 @@ fi
 
 if [[ -n "${NETWORK_TRACE}" ]]; then
 	CMD+=(--network-trace "${NETWORK_TRACE}")
+fi
+
+if [[ -n "${ABR_PROFILE}" ]]; then
+	CMD+=(--abr-profile "${ABR_PROFILE}")
 fi
 
 "${CMD[@]}"

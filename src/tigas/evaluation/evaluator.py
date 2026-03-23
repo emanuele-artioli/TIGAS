@@ -242,6 +242,7 @@ class EvaluationRunner:
             curve_rows.append(
                 {
                     "resolution": f"{width}x{height}",
+                    "abr_profile": baseline_summary.get("abr_profile"),
                     "lod": baseline_summary["config"]["default_lod"],
                     "sparsity": 1.0,
                     "quant_bits": baseline_summary["config"]["quant_bits"],
@@ -279,6 +280,7 @@ class EvaluationRunner:
                     curve_rows.append(
                         {
                             "resolution": f"{width}x{height}",
+                            "abr_profile": summary.get("abr_profile"),
                             "lod": summary["config"]["default_lod"],
                             "sparsity": safe_sparsity,
                             "quant_bits": summary["config"]["quant_bits"],
@@ -300,6 +302,7 @@ class EvaluationRunner:
                 handle,
                 fieldnames=[
                     "resolution",
+                    "abr_profile",
                     "lod",
                     "sparsity",
                     "quant_bits",
@@ -320,14 +323,14 @@ class EvaluationRunner:
         curve_md = root / "tradeoff_curve.md"
         with curve_md.open("w", encoding="utf-8") as handle:
             handle.write(
-                "| Resolution | LOD | Sparsity | Quant bits | Points | SSIM vs full | Coverage | Render mean ms | FPS | Summary |\\n"
+                "| Resolution | ABR | LOD | Sparsity | Quant bits | Points | SSIM vs full | Coverage | Render mean ms | FPS | Summary |\n"
             )
-            handle.write("|---|---|---:|---:|---:|---:|---:|---:|---:|---|\\n")
+            handle.write("|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|\n")
             for row in curve_rows:
                 ssim_value = row["ssim_vs_full_mean"]
                 ssim_text = f"{ssim_value:.4f}" if isinstance(ssim_value, float) else "n/a"
                 handle.write(
-                    f"| {row['resolution']} | {row['lod']} | {row['sparsity']:.2f} | {row['quant_bits']} "
+                    f"| {row['resolution']} | {row.get('abr_profile') or 'none'} | {row['lod']} | {row['sparsity']:.2f} | {row['quant_bits']} "
                     f"| {row['point_count']} | {ssim_text} | {row['coverage_mean']:.4f} "
                     f"| {row['render_ms_mean']:.3f} | {row['effective_fps']:.2f} | {row['summary_path']} |\\n"
                 )

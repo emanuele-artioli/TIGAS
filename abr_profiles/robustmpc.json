@@ -1,0 +1,12 @@
+{
+  "name": "robustmpc",
+  "algorithm": "robustmpc",
+  "bitrates_kbps": [800, 1500, 2500, 4000, 6000],
+  "lods": ["quant_8bit", "sampled_50", "sampled_50", "full", "full"],
+  "robustmpc_horizon": 3,
+  "robustmpc_rebuffer_penalty": 4.3,
+  "robustmpc_switch_penalty": 0.15,
+  "ewma_alpha": 0.3,
+  "min_bitrate_kbps": 500,
+  "max_bitrate_kbps": 7000
+}

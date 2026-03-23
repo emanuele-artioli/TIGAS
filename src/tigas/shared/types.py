@@ -102,6 +102,9 @@ class ExperimentConfig:
     default_lod: LodId
     asset_path: Optional[str] = None
     network_trace_path: Optional[str] = None
+    abr_profile_path: Optional[str] = None
+    enable_tc: bool = False
+    tc_interface: Optional[str] = None
     output_dir: str = "outputs/headless"
     num_frames: int = 120
     fps: int = 30

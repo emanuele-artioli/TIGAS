@@ -15,6 +15,14 @@ from typing import Callable
 import numpy as np
 
 from tigas.input_control.headless_replayer import HeadlessTraceReplayer
+from tigas.instrumentation.tc_profiles import TcProfileManager
+from tigas.intelligence.abr_client import (
+    ThroughputEstimator,
+    build_client_abr_controller,
+    load_abr_profile,
+    resolve_abr_profile,
+)
+from tigas.intelligence.abr_server import ServerAbrController
 from tigas.renderer.backend_cpu import CpuFallbackBackend
 from tigas.renderer.backend_gsplat import GsplatCudaBackend
 from tigas.shared.types import ExperimentConfig, RenderRequest, UplinkDatagram
@@ -121,15 +129,83 @@ class HeadlessAblationRunner:
 
         datagrams, trace_source = self._build_datagrams(config=config, renderer=renderer)
 
+        abr_profile_name: str | None = None
+        client_abr = None
+        server_abr = None
+        throughput_estimator = None
+        if config.abr_profile_path:
+            resolved_abr_profile = resolve_abr_profile(config.abr_profile_path)
+            if resolved_abr_profile is not None:
+                profile = load_abr_profile(resolved_abr_profile)
+                abr_profile_name = profile.name
+                client_abr = build_client_abr_controller(profile)
+                server_abr = ServerAbrController(frame_budget_ms=1000.0 / max(1, config.fps))
+                throughput_estimator = ThroughputEstimator(ewma_alpha=profile.ewma_alpha)
+
+        tc_manager = TcProfileManager() if config.enable_tc and config.tc_interface else None
+        tc_status = "disabled"
+        last_tc_rate_kbps: int | None = None
+        tc_applied = False
+
         render_times_ms: list[float] = []
+        abr_target_kbps: list[int] = []
+        abr_lod_choices: list[str] = []
+        measured_throughput_kbps: list[float] = []
+        buffer_level_ms = 2000.0
+        max_buffer_ms = 6000.0
+        previous_timestamp_ms: float | None = None
+        previous_render_ms = 0.0
 
         wall_start = time.perf_counter()
         try:
             for datagram in datagrams:
-                lod = datagram.requested_lod if config.default_lod == "adaptive" else config.default_lod
+                if previous_timestamp_ms is None:
+                    frame_interval_ms = 1000.0 / max(1, config.fps)
+                else:
+                    frame_interval_ms = max(1.0, datagram.timestamp_ms - previous_timestamp_ms)
+                previous_timestamp_ms = datagram.timestamp_ms
+
+                baseline_target_kbps = int(max(1, datagram.target_bitrate_kbps))
+                estimated_throughput_kbps = float(baseline_target_kbps)
+                if throughput_estimator is not None:
+                    estimated_throughput_kbps = throughput_estimator.current(baseline_target_kbps)
+
+                if client_abr is not None and server_abr is not None:
+                    client_decision = client_abr.decide(
+                        throughput_kbps=estimated_throughput_kbps,
+                        decode_latency_ms=previous_render_ms,
+                        buffer_level_ms=buffer_level_ms,
+                    )
+                    server_decision = server_abr.decide(
+                        render_time_ms=previous_render_ms,
+                        encode_queue_depth=0,
+                        gpu_utilization=0.0,
+                        client_requested_lod=client_decision.requested_lod,
+                        client_target_bitrate_kbps=client_decision.target_bitrate_kbps,
+                    )
+                    chosen_lod = server_decision.enforced_lod
+                    chosen_target_kbps = int(max(1, server_decision.encoder_bitrate_kbps))
+                    if config.network_trace_path:
+                        chosen_target_kbps = min(chosen_target_kbps, baseline_target_kbps)
+                else:
+                    chosen_target_kbps = baseline_target_kbps
+                    chosen_lod = datagram.requested_lod if config.default_lod == "adaptive" else config.default_lod
+
+                if tc_manager is not None:
+                    tc_rate_kbps = baseline_target_kbps if config.network_trace_path else chosen_target_kbps
+                    if last_tc_rate_kbps != tc_rate_kbps:
+                        try:
+                            tc_manager.apply_rate_kbps(config.tc_interface or "", tc_rate_kbps)
+                            tc_status = "active"
+                            tc_applied = True
+                            last_tc_rate_kbps = tc_rate_kbps
+                        except Exception as exc:  # pragma: no cover - host-permission dependent
+                            tc_status = f"disabled:{type(exc).__name__}"
+                            tc_manager = None
+
                 request = RenderRequest(
                     pose_matrix_4x4=datagram.camera_matrix_4x4,
-                    lod_id=lod,
+                    lod_id=chosen_lod,
                     time_offset_ms=datagram.timestamp_ms,
                 )
 
@@ -137,6 +213,9 @@ class HeadlessAblationRunner:
                 frame = renderer.render(request)
                 render_ms = (time.perf_counter() - render_start) * 1000.0
                 render_times_ms.append(render_ms)
+                previous_render_ms = render_ms
+                abr_target_kbps.append(chosen_target_kbps)
+                abr_lod_choices.append(chosen_lod)
 
                 if frame_callback is not None:
                     frame_callback(
@@ -147,7 +226,24 @@ class HeadlessAblationRunner:
                         datagram,
                         render_ms,
                     )
+
+                if throughput_estimator is not None:
+                    measured = throughput_estimator.observe(
+                        delivered_bytes=len(frame.data),
+                        elapsed_s=frame_interval_ms / 1000.0,
+                    )
+                    measured_throughput_kbps.append(measured)
+                    frame_bits = float(len(frame.data) * 8)
+                    download_time_ms = frame_bits / max(1.0, float(chosen_target_kbps))
+                    buffer_level_ms = float(
+                        np.clip(buffer_level_ms + frame_interval_ms - download_time_ms, 0.0, max_buffer_ms)
+                    )
         finally:
+            if tc_manager is not None and tc_applied and config.tc_interface:
+                try:
+                    tc_manager.clear(config.tc_interface)
+                except Exception as exc:  # pragma: no cover - host-permission dependent
+                    tc_status = f"clear_failed:{type(exc).__name__}"
             renderer.shutdown()
 
         wall_time_s = time.perf_counter() - wall_start
@@ -164,11 +260,26 @@ class HeadlessAblationRunner:
             "target_bitrate_kbps_mean": float(
                 np.mean([d.target_bitrate_kbps for d in datagrams])
             ),
+            "abr_target_bitrate_kbps_mean": float(np.mean(abr_target_kbps)) if abr_target_kbps else None,
+            "abr_throughput_kbps_mean": float(np.mean(measured_throughput_kbps))
+            if measured_throughput_kbps
+            else None,
             "frames_rendered": frames_rendered,
             "resolution": {"width": config.width, "height": config.height},
             "renderer_backend": backend_name,
             "point_count": point_count,
             "scene_radius": scene_radius,
+            "abr_profile": abr_profile_name,
+            "abr_lod_distribution": {
+                lod: int(abr_lod_choices.count(lod)) for lod in sorted(set(abr_lod_choices))
+            }
+            if abr_lod_choices
+            else {},
+            "tc": {
+                "enabled": bool(config.enable_tc and config.tc_interface),
+                "interface": config.tc_interface,
+                "status": tc_status,
+            },
             "render_time_ms": {
                 "mean": float(statistics.fmean(render_times_ms)),
                 "median": float(statistics.median(render_times_ms)),

@@ -9,6 +9,7 @@ scenarios:
 
 1. Movement traces: `movement_traces/*.json`
 2. Network traces: `network_traces/*.csv`
+3. ABR profiles: `abr_profiles/*.json` (`throughput`, `bola`, `robustmpc`)
 
 ## Matrix Dimensions
 
@@ -17,16 +18,18 @@ Suggested first matrix:
 1. Resolution: for example `960x540`, `1280x720`
 2. Sparsity level: for example `1.0`, `0.75`, `0.5`, `0.25`
 3. Quantization: for example `8`, `6`, `4`, `3` bits
-4. Optional runtime dimensions: codec, predictor, network profile
+4. ABR policy: for example `throughput`, `bola`, `robustmpc`
+5. Optional runtime dimensions: codec, predictor, network profile
 
 ## Single Experiment Lifecycle
 
 1. Load trace file and scenario metadata.
 2. Select standardized movement and network traces for reproducibility.
-3. Run baseline full-reference configuration for each resolution.
-4. Run matrix variants through evaluation component using the same traces.
-5. Compute per-frame metrics and SSIM versus reference.
-6. Encode per-run video and generate tradeoff curve artifacts.
+3. Select one ABR profile file and pass it as runtime/evaluation argument.
+4. Run baseline full-reference configuration for each resolution.
+5. Run matrix variants through evaluation component using the same traces.
+6. Compute per-frame metrics and SSIM versus reference.
+7. Encode per-run video and generate tradeoff curve artifacts.
 
 ## Required Outputs Per Run
 
@@ -41,9 +44,10 @@ Suggested first matrix:
 1. Motion-to-photon latency (p50, p95)
 2. End-to-end frame time budget split
 3. Throughput versus target bitrate tracking
-4. Frame drop ratio and stall intervals
-5. Predictor error in translational and rotational terms
-6. SSIM proxy versus full-reference run
+4. ABR-selected LOD distribution across frames
+5. Frame drop ratio and stall intervals
+6. Predictor error in translational and rotational terms
+7. SSIM proxy versus full-reference run
 
 ## CI Reduced Matrix
 
