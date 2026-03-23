@@ -1,39 +1,29 @@
-"""Headless ablation runner placeholder.
+"""Headless runtime runner.
 
-Runs trace-driven experiments across combinations of codec, predictor, network,
-and LOD policies while collecting standardized metrics outputs.
+This module is runtime-focused: it drives renderer execution for a pose stream
+and reports render timing without writing evaluation artifacts.
 """
 
 from __future__ import annotations
 
-import csv
-import json
-import shutil
 import statistics
-import subprocess
 import time
 from dataclasses import asdict
-from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 
 from tigas.input_control.headless_replayer import HeadlessTraceReplayer
 from tigas.renderer.backend_cpu import CpuFallbackBackend
 from tigas.renderer.backend_gsplat import GsplatCudaBackend
-from tigas.shared.types import ExperimentConfig, RenderRequest
+from tigas.shared.types import ExperimentConfig, RenderRequest, UplinkDatagram
 
-
-def _write_ppm(path: Path, frame_rgb: np.ndarray) -> None:
-    """Write uint8 RGB frame to a binary PPM file."""
-    height, width, _ = frame_rgb.shape
-    with path.open("wb") as handle:
-        handle.write(f"P6\n{width} {height}\n255\n".encode("ascii"))
-        handle.write(frame_rgb.tobytes())
+FrameCallback = Callable[[bytes, int, int, int, UplinkDatagram, float], None]
 
 
 class HeadlessAblationRunner:
-    """Runner for scripted headless ablation experiments."""
+    """Runtime renderer loop for headless execution."""
 
     def _build_renderer(self, config: ExperimentConfig, point_cloud_path: Path):
         if config.renderer_backend == "gsplat_cuda":
@@ -67,56 +57,12 @@ class HeadlessAblationRunner:
             "Could not resolve a point-cloud path. Set `asset_path` to a valid .ply file."
         )
 
-    def _build_output_dir(self, config: ExperimentConfig, cloud_path: Path) -> Path:
-        run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        run_name = f"{run_id}_{cloud_path.stem}_{config.default_lod}_{config.codec}"
-        output_dir = Path(config.output_dir) / run_name
-        output_dir.mkdir(parents=True, exist_ok=True)
-        return output_dir
-
-    def _maybe_encode_video(self, frames_dir: Path, output_path: Path, fps: int) -> Path | None:
-        ffmpeg = shutil.which("ffmpeg")
-        if ffmpeg is None:
-            return None
-
-        command = [
-            ffmpeg,
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-framerate",
-            str(max(1, fps)),
-            "-i",
-            str(frames_dir / "frame_%05d.ppm"),
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            str(output_path),
-        ]
-        completed = subprocess.run(command, capture_output=True, text=True, check=False)
-        if completed.returncode != 0:
-            return None
-        return output_path
-
-    def run_one(self, config: ExperimentConfig) -> dict:
-        """Execute one experiment and return summary metadata."""
-        point_cloud_path = self._resolve_point_cloud_path(config)
-        output_dir = self._build_output_dir(config, point_cloud_path)
-        frames_dir = output_dir / "frames"
-        frames_dir.mkdir(parents=True, exist_ok=True)
-
-        renderer = self._build_renderer(config=config, point_cloud_path=point_cloud_path)
-        renderer.initialize()
-        point_count = renderer.loaded_point_count
-        scene_radius = renderer.scene_radius
-        backend_name = renderer.backend_name
-
+    def _build_datagrams(self, config: ExperimentConfig, renderer) -> tuple[list[UplinkDatagram], str]:
         replayer = HeadlessTraceReplayer()
         trace_json = Path(config.trace_path) if config.trace_path else None
         if trace_json and trace_json.exists() and trace_json.suffix.lower() == ".json":
             samples = replayer.load_trace(str(trace_json))
+            trace_source = str(trace_json)
         else:
             orbit_radius = max(renderer.scene_radius * 2.2, 0.4)
             samples = replayer.generate_orbit_samples(
@@ -126,15 +72,27 @@ class HeadlessAblationRunner:
                 fps=config.fps,
                 requested_lod=config.default_lod,
             )
+            trace_source = "generated_orbit"
 
         datagrams = replayer.build_datagrams(samples)
         if config.num_frames > 0 and len(datagrams) > config.num_frames:
             datagrams = datagrams[: config.num_frames]
 
-        frame_metrics: list[dict] = []
+        return datagrams, trace_source
+
+    def run_one(self, config: ExperimentConfig, frame_callback: FrameCallback | None = None) -> dict:
+        """Execute one runtime render pass and return timing summary."""
+        point_cloud_path = self._resolve_point_cloud_path(config)
+
+        renderer = self._build_renderer(config=config, point_cloud_path=point_cloud_path)
+        renderer.initialize()
+        point_count = renderer.loaded_point_count
+        scene_radius = renderer.scene_radius
+        backend_name = renderer.backend_name
+
+        datagrams, trace_source = self._build_datagrams(config=config, renderer=renderer)
+
         render_times_ms: list[float] = []
-        coverage_values: list[float] = []
-        brightness_values: list[float] = []
 
         wall_start = time.perf_counter()
         try:
@@ -151,51 +109,28 @@ class HeadlessAblationRunner:
                 render_ms = (time.perf_counter() - render_start) * 1000.0
                 render_times_ms.append(render_ms)
 
-                frame_rgb = np.frombuffer(frame.data, dtype=np.uint8).reshape(
-                    (frame.height, frame.width, 3)
-                )
-                active_pixels = np.count_nonzero(frame_rgb.sum(axis=2))
-                coverage = float(active_pixels / (frame.width * frame.height))
-                brightness = float(frame_rgb.mean() / 255.0)
-                coverage_values.append(coverage)
-                brightness_values.append(brightness)
-
-                _write_ppm(frames_dir / f"frame_{frame.frame_id:05d}.ppm", frame_rgb)
-
-                frame_metrics.append(
-                    {
-                        "frame_id": frame.frame_id,
-                        "timestamp_ms": datagram.timestamp_ms,
-                        "render_time_ms": render_ms,
-                        "coverage": coverage,
-                        "brightness": brightness,
-                    }
-                )
+                if frame_callback is not None:
+                    frame_callback(
+                        frame.data,
+                        frame.width,
+                        frame.height,
+                        frame.frame_id,
+                        datagram,
+                        render_ms,
+                    )
         finally:
             renderer.shutdown()
 
         wall_time_s = time.perf_counter() - wall_start
-        frames_rendered = len(frame_metrics)
+        frames_rendered = len(render_times_ms)
         if frames_rendered == 0:
-            raise RuntimeError("Headless experiment rendered zero frames.")
-
-        metrics_csv = output_dir / "frame_metrics.csv"
-        with metrics_csv.open("w", encoding="utf-8", newline="") as handle:
-            writer = csv.DictWriter(
-                handle,
-                fieldnames=["frame_id", "timestamp_ms", "render_time_ms", "coverage", "brightness"],
-            )
-            writer.writeheader()
-            writer.writerows(frame_metrics)
+            raise RuntimeError("Headless runtime rendered zero frames.")
 
         render_times_array = np.asarray(render_times_ms, dtype=np.float64)
-        summary = {
+        return {
             "status": "ok",
             "point_cloud_path": str(point_cloud_path),
-            "trace_source": str(trace_json) if (trace_json and trace_json.exists()) else "generated_orbit",
-            "output_dir": str(output_dir),
-            "frames_dir": str(frames_dir),
-            "frame_metrics_csv": str(metrics_csv),
+            "trace_source": trace_source,
             "frames_rendered": frames_rendered,
             "resolution": {"width": config.width, "height": config.height},
             "renderer_backend": backend_name,
@@ -208,29 +143,13 @@ class HeadlessAblationRunner:
                 "min": float(render_times_array.min()),
                 "max": float(render_times_array.max()),
             },
-            "coverage_mean": float(statistics.fmean(coverage_values)),
-            "brightness_mean": float(statistics.fmean(brightness_values)),
             "wall_time_s": wall_time_s,
             "effective_fps": float(frames_rendered / wall_time_s) if wall_time_s > 0 else 0.0,
             "config": asdict(config),
         }
 
-        video_path = self._maybe_encode_video(
-            frames_dir=frames_dir,
-            output_path=output_dir / "headless_render.mp4",
-            fps=config.fps,
-        )
-        summary["video_path"] = str(video_path) if video_path else None
-
-        summary_path = output_dir / "summary.json"
-        with summary_path.open("w", encoding="utf-8") as handle:
-            json.dump(summary, handle, indent=2)
-        summary["summary_path"] = str(summary_path)
-
-        return summary
-
     def run_matrix(self, configs: list[ExperimentConfig]) -> list[dict]:
-        """Execute a list of experiments and collect summaries."""
+        """Execute a list of runtime render runs."""
         results: list[dict] = []
         for config in configs:
             results.append(self.run_one(config))

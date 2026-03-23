@@ -68,10 +68,10 @@ pip install -r requirements.txt
 pytest -q
 ```
 
-## Headless Experiment Run
+## Runtime-Only Headless Run
 
-The baseline headless path does not require a display server and is suitable
-for CUDA servers accessed over SSH.
+The runtime headless path is latency-oriented and avoids evaluation overhead
+(no frame-dump metrics, no SSIM, no video encoding).
 
 Run one experiment:
 
@@ -80,7 +80,6 @@ PYTHONPATH=src python -m tigas.orchestration.run_headless \
   --ply-path "/path/to/scene.compressed.ply" \
   --renderer-backend cpu \
   --quant-bits 8 \
-  --output-dir outputs/headless \
   --num-frames 120 \
   --fps 30 \
   --width 960 \
@@ -100,6 +99,35 @@ Or use the helper script:
 ```bash
 ./scripts/run_headless_ablation.sh "/path/to/scene.compressed.ply"
 ```
+
+## Evaluation Component (Offline)
+
+All evaluation-heavy responsibilities are centralized in `tigas.evaluation`.
+This component performs frame export, SSIM proxy computation against full
+reference runs, tradeoff-curve generation, and required video encoding.
+
+Run a sparsity/resolution/quantization sweep:
+
+```bash
+PYTHONPATH=src python -m tigas.evaluation.run_evaluation \
+  --ply-path "/path/to/scene.ply" \
+  --renderer-backend gsplat_cuda \
+  --output-dir outputs/evaluation \
+  --num-frames 120 \
+  --fps 30 \
+  --max-points 300000 \
+  --sparsity-levels "1.0,0.75,0.5,0.25" \
+  --resolutions "960x540,1280x720" \
+  --quant-bits-list "8,6,4,3"
+```
+
+Evaluation outputs:
+
+1. per-run `frames/frame_*.ppm`
+2. per-run `frame_metrics.csv` (includes `ssim_vs_full`)
+3. per-run `summary.json`
+4. per-run `headless_render.mp4` (evaluation requires `ffmpeg`)
+5. global `tradeoff_curve.csv` and `tradeoff_curve.md`
 
 Output artifacts per run:
 

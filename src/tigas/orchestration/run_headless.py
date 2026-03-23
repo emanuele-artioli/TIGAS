@@ -1,4 +1,4 @@
-"""CLI entrypoint for headless TIGAS experiments."""
+"""CLI entrypoint for runtime-only headless TIGAS rendering."""
 
 from __future__ import annotations
 
@@ -10,16 +10,16 @@ from tigas.shared.types import ExperimentConfig
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run a headless TIGAS experiment")
+    parser = argparse.ArgumentParser(description="Run a runtime-only headless TIGAS render")
     parser.add_argument("--ply-path", required=True, help="Path to .ply point cloud")
     parser.add_argument(
         "--trace-json",
         default="",
         help="Optional movement trace JSON. If omitted, an orbit trace is generated.",
     )
-    parser.add_argument("--output-dir", default="outputs/headless", help="Output root directory")
+    parser.add_argument("--output-dir", default="outputs/headless", help="Reserved for compatibility")
     parser.add_argument("--num-frames", type=int, default=120, help="Number of frames to render")
-    parser.add_argument("--fps", type=int, default=30, help="Frame rate used for timestamps/video")
+    parser.add_argument("--fps", type=int, default=30, help="Frame rate used for timestamps")
     parser.add_argument("--width", type=int, default=960, help="Output frame width")
     parser.add_argument("--height", type=int, default=540, help="Output frame height")
     parser.add_argument("--max-points", type=int, default=120000, help="Point budget for rendering")

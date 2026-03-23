@@ -44,6 +44,17 @@ Develop a research-grade remote rendering system for 3D Gaussian Splatting (3DGS
 
 * **WebGPU Super-Resolution**: Optional modular component to upscale 720p renders to 1080p locally to save bandwidth.
 
+### **F. Evaluation & Ablation Component (Offline Only)**
+
+* Must be a dedicated module separated from runtime-critical components.
+* Owns all experiment-only work: frame dumps, metric aggregation, SSIM/quality proxies, tradeoff-curve generation, and video encoding.
+* Must support matrix sweeps over:
+  * splat sparsity levels,
+  * output resolutions,
+  * quantization strengths.
+* Must compute an image-quality proxy (at least SSIM against a full-reference run at the same resolution).
+* Runtime modules (renderer/orchestrator/transport) must not include evaluation-specific logic that would add hot-path latency.
+
 ## **4\. Performance & Research Instrumentation**
 
 * **Zero-Interference Metrics**: Use the provided metrics\_buffer.py. Hot-paths (Renderer/Transport) write to a lock-free circular buffer in shared memory. A background thread drains to .parquet.  
@@ -55,6 +66,7 @@ Develop a research-grade remote rendering system for 3D Gaussian Splatting (3DGS
 * **Docker**: Each module (renderer, encoder, predictor) must have its own Dockerfile.  
 * **GitHub Actions**: Create a workflow that runs an "Ablation Matrix" (Headless Client \+ Server) across different configurations and uploads metrics as artifacts.  
 * **Isolation**: Every component must be usable in isolation if its standardized I/O (defined in the project spec) is respected.
+* **Evaluation Decoupling**: Evaluation should be runnable repeatedly during development, but fully optional once runtime validation is complete.
 
 ## **6\. Success Criteria**
 
