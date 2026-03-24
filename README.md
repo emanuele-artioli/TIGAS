@@ -47,6 +47,23 @@ contract-first for incremental implementation. Current capabilities include:
 
 The goal is to implement components incrementally while preserving a stable high-level architecture.
 
+## Re-entry Guide (When You Resume)
+
+If you pause this project and return later, use this exact re-entry order:
+
+1. Read `docs/REENTRY.md` for the short restart checklist and current roadmap.
+2. Validate environment and contracts: `conda activate tigas && pytest -q`.
+3. Run one runtime smoke pass (headless) and one evaluation sweep.
+4. Confirm output artifacts are produced under `outputs/`.
+5. Continue from the "Open Work" section in `docs/REENTRY.md`.
+
+Quick links:
+
+1. `docs/REENTRY.md`
+2. `docs/blueprint.md`
+3. `docs/ARCHITECTURE.md`
+4. `docs/ABLATION_WORKFLOW.md`
+
 ## Core Contracts
 
 The canonical module contracts are described in:
@@ -211,3 +228,10 @@ Implement one subsystem at a time in this order:
 6. Metrics buffer integration and kernel-level instrumentation
 
 Each step should preserve contract compatibility and keep all other modules mockable.
+
+## Known Boundaries (Current)
+
+1. Headless runtime and offline evaluation are implemented and intentionally decoupled.
+2. ABR profile-driven comparison is implemented (`throughput`, `bola`, `robustmpc`).
+3. Linux `tc` shaping is best-effort and depends on host permissions/capabilities.
+4. Interactive browser + full MoQ transport pipeline is still scaffold-level and not the current validated path.

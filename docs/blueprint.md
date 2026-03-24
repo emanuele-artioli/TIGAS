@@ -73,3 +73,29 @@ Develop a research-grade remote rendering system for 3D Gaussian Splatting (3DGS
 1. Successful rendering of a 3DGS scene in a browser via MoQ with \<100ms latency.  
 2. Ability to run a "Headless Ablation" that compares h264 vs av1 using a movement trace and outputs a performance report.  
 3. 4DGS ready: The system clock must be passed through the entire pipeline to support temporal splats.
+
+## **7\. Current Implementation Snapshot (March 2026)**
+
+Implemented now:
+
+1. Headless runtime rendering path with CPU and gsplat backends.
+2. Offline evaluation module with frame metrics, SSIM proxy, video encoding, and tradeoff curves.
+3. Standardized movement/network trace selection by file path or trace name.
+4. File-based ABR profiles with runtime selection (`throughput`, `bola`, `robustmpc`).
+5. Optional best-effort Linux `tc` shaping hooks.
+
+Not fully implemented yet:
+
+1. Full interactive browser-to-transport production path.
+2. End-to-end MoQ runtime validation against strict latency targets.
+3. Transport-coupled throughput measurement (current ABR estimator is renderer-payload based).
+
+## **8\. Re-entry Plan**
+
+When resuming development after a pause:
+
+1. Start with `docs/REENTRY.md` and follow the startup checklist.
+2. Re-run tests and a short runtime smoke experiment.
+3. Re-run ABR comparison using fixed movement and network traces.
+4. Use generated reports to choose next ABR/profile tuning or transport integration task.
+5. Update docs immediately after any architectural or CLI change.
